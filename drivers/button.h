@@ -1,6 +1,10 @@
 #ifndef BUTTON_H
 #define BUTTON_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @brief Initialize user button driver
  */
@@ -11,5 +15,9 @@ void button_init(void);
  * @return 1 if the button is pressed, 0 otherwise.
  */
 uint32_t button_read(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* BUTTON_H */
