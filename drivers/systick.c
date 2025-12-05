@@ -7,43 +7,43 @@
 
 /***************** SYS_CSR ******************/
 /* set to 1 to enable SysTick */
-#define SYST_CSR_ENABLE_POS 0U
-#define SYST_CSR_ENABLE_MASK (1U << SYST_CSR_ENABLE_POS)
+#define SYST_CSR_ENABLE_POS     0U
+#define SYST_CSR_ENABLE_MASK    (1U << SYST_CSR_ENABLE_POS)
 
 /* set to 1 -> couting down to 0 asserts SysTick exception request */
-#define SYST_CSR_TICKINT_POS 1U
-#define SYST_CSR_TICKINT_MASK (1U << SYST_CSR_TICKINT_POS)
+#define SYST_CSR_TICKINT_POS    1U
+#define SYST_CSR_TICKINT_MASK   (1U << SYST_CSR_TICKINT_POS)
 
 /* 0 for external source, 1 for processor clock */
-#define SYST_CSR_CLKSOURCE_POS 2U
+#define SYST_CSR_CLKSOURCE_POS  2U
 #define SYST_CSR_CLKSOURCE_MASK (1U << SYST_CSR_CLKSOURCE_POS)
 
 /* Returns 1 if timer counted to 0 since last read */
-#define SYST_CSR_COUNTFLAG_POS 16U
+#define SYST_CSR_COUNTFLAG_POS  16U
 #define SYST_CSR_COUNTFLAG_MASK (1U << SYST_CSR_COUTFLAG_POS)
 
 /***************** SYST_RVR ******************/
 /* [23:0] Value to load into the SYST_CVR register when the counter is enabled and when it reaches 0 */
-#define SYST_RVR_RELOAD_POS 0U
-#define SYST_RVR_RELOAD_MASK (0xFFFFFFU << SYST_RVR_RELOAD_POS)
+#define SYST_RVR_RELOAD_POS     0U
+#define SYST_RVR_RELOAD_MASK    (0xFFFFFFU << SYST_RVR_RELOAD_POS)
 
 /***************** SYST_CVR ******************/
 /* [23:0] Reads/return the current value of the SysTick counter */
-#define SYST_CVR_RELOAD_POS 0U
-#define SYST_CVR_RELOAD_MASK (0xFFFFFFU << SYST_CVR_RELOAD_POS)
+#define SYST_CVR_RELOAD_POS     0U
+#define SYST_CVR_RELOAD_MASK    (0xFFFFFFU << SYST_CVR_RELOAD_POS)
 
 /***************** SYST_CALIB ******************/
 /* [23:0] Reload value for 10ms timing */
-#define SYST_CALIB_TENMS_POS   0U
-#define SYST_CALIB_TENMS_MASK  (0xFFFFFFUL << SYST_CALIB_TENMS_POS)
+#define SYST_CALIB_TENMS_POS    0U
+#define SYST_CALIB_TENMS_MASK   (0xFFFFFFUL << SYST_CALIB_TENMS_POS)
 
 /* 1 = TENMS value is not exactly 10ms */
-#define SYST_CALIB_SKEW_POS    30U
-#define SYST_CALIB_SKEW_MASK   (1UL << SYST_CALIB_SKEW_POS)
+#define SYST_CALIB_SKEW_POS     30U
+#define SYST_CALIB_SKEW_MASK    (1UL << SYST_CALIB_SKEW_POS)
 
 /* 1 = No external reference clock is provided */
-#define SYST_CALIB_NOREF_POS   31U
-#define SYST_CALIB_NOREF_MASK  (1UL << SYST_CALIB_NOREF_POS)
+#define SYST_CALIB_NOREF_POS    31U
+#define SYST_CALIB_NOREF_MASK   (1UL << SYST_CALIB_NOREF_POS)
 
 /* Simple global tick counter incremented on each SysTick interrupt */
 static volatile uint32_t systick_tick_counter = 0;
@@ -71,7 +71,7 @@ int systick_init(uint32_t ticks_hz) {
     if (reload > SYST_RVR_RELOAD_MASK) {
         return -1; /* error: reload value too large */
     }
-    
+
     /* disable SysTick for configuration */
     SYST_CSR = 0;
 
