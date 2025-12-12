@@ -1,8 +1,5 @@
 #include "scheduler.h"
 
-#define SCB_ICSR_PENDSVSET_Pos  28u
-#define SCB_ICSR_PENDSVSET_Msk  (1u << SCB_ICSR_PENDSVSET_Pos)
-
 task_t   task_list[MAX_TASKS];
 task_t  *task_current = NULL;
 task_t  *task_next = NULL;
