@@ -1,19 +1,4 @@
 #include "system_clock.h"
-#include <stdint.h>
-
-/*********** Base addresses ***********/
-#define RCC_BASE            0x40021000UL
-#define FLASH_BASE          0x40022000UL
-#define APB1_BASE           0x40000000UL
-#define PWR_BASE            (APB1_BASE + 0x7000UL)
-
-/*********** Register access macros ***********/
-#define RCC_CR              (*(volatile uint32_t *)(RCC_BASE + 0x00))
-#define RCC_CFGR            (*(volatile uint32_t *)(RCC_BASE + 0x08))
-#define RCC_PLLCFGR         (*(volatile uint32_t *)(RCC_BASE + 0x0C))
-#define RCC_APB1ENR1        (*(volatile uint32_t *)(RCC_BASE + 0x58))
-#define FLASH_ACR           (*(volatile uint32_t *)(FLASH_BASE + 0x00))
-#define PWR_CR1             (*(volatile uint32_t *)(PWR_BASE + 0x00))
 
 /*********** FLASH_ACR ***********/
 /*
@@ -244,14 +229,14 @@ static void flash_set_latency(sysclock_hz_t sysclk_hz, system_vos_t power)  {
             break;
     }   
 
-    uint32_t tmp = FLASH_ACR;       /* save the current register state */
+    uint32_t tmp = FLASH->ACR;       /* save the current register state */
     tmp &= ~FLASH_ACR_LATENCY_MASK;  /* zero the latency section */
     /* set the new latency */
     tmp |= ((latency << FLASH_ACR_LATENCY_POS) & FLASH_ACR_LATENCY_MASK);
     tmp |= FLASH_ACR_PRFTEN;        /* enable prefetch */
     tmp |= FLASH_ACR_ICEN;          /* enable instruction cache */
     tmp |= FLASH_ACR_DCEN;          /* enable data cache */
-    FLASH_ACR = tmp;                /* update the register */
+    FLASH->ACR = tmp;                /* update the register */
 }
 
 /* Set power voltage scaling range */
@@ -259,10 +244,10 @@ static int power_set_vos(sysclock_hz_t sysclk_hz, system_vos_t *out_vos)
 {
     system_vos_t vos;
     /* Enable PWR clock */
-    RCC_APB1ENR1 |= RCC_APB1ENR1_PWREN;
+    RCC->APB1ENR1 |= RCC_APB1ENR1_PWREN;
 
     /* Set VOS bits to desired range */
-    uint32_t tmp = PWR_CR1;
+    uint32_t tmp = PWR->CR1;
     tmp &= ~PWR_CR1_VOS_MASK; /* clear VOS bits */
     if(sysclk_hz <= 26000000UL) {
         tmp |= PWR_CR1_VOS_RANGE2;
@@ -272,9 +257,9 @@ static int power_set_vos(sysclock_hz_t sysclk_hz, system_vos_t *out_vos)
         vos = SYSTEM_VOS1;
     }
 
-    PWR_CR1 = tmp;
+    PWR->CR1 = tmp;
     /* wait until VOS bits are set */
-    if (wait_for_reg_mask_eq(&PWR_CR1, PWR_CR1_VOS_MASK, tmp & PWR_CR1_VOS_MASK, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    if (wait_for_reg_mask_eq(&PWR->CR1, PWR_CR1_VOS_MASK, tmp & PWR_CR1_VOS_MASK, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
     if (out_vos) *out_vos = vos;
@@ -283,34 +268,34 @@ static int power_set_vos(sysclock_hz_t sysclk_hz, system_vos_t *out_vos)
 
 /* set system clock to default state (MSI 4MHz) */
 static int system_clock_set_default(void) {
-    RCC_CR |= RCC_CR_MSION; /* Enable MSI */
-    if (wait_for_flag_set(&RCC_CR, RCC_CR_MSIRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    RCC->CR |= RCC_CR_MSION; /* Enable MSI */
+    if (wait_for_flag_set(&RCC->CR, RCC_CR_MSIRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
 
     /* set MSI default frequency */
-    RCC_CR &= ~RCC_CR_MSIRANGE_MASK;
-    RCC_CR |= (0x6U << RCC_CR_MSIRANGE_POS); /* 4 MHz */
+    RCC->CR &= ~RCC_CR_MSIRANGE_MASK;
+    RCC->CR |= (0x6U << RCC_CR_MSIRANGE_POS); /* 4 MHz */
 
     /* Switch SYSCLK to MSI */
-    uint32_t tmp = RCC_CFGR;
+    uint32_t tmp = RCC->CFGR;
     tmp &= ~(RCC_CFGR_SW_MASK); /* clear SW bits */
     tmp |= (SYSCLK_SRC_MSI << RCC_CFGR_SW_POS); /* select MSI */
-    RCC_CFGR = tmp;
+    RCC->CFGR = tmp;
     /* Wait until MSI is used as system clock */
-    if (wait_for_reg_mask_eq(&RCC_CFGR, RCC_CFGR_SWS_MASK, (SYSCLK_SRC_MSI << RCC_CFGR_SWS_POS), SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    if (wait_for_reg_mask_eq(&RCC->CFGR, RCC_CFGR_SWS_MASK, (SYSCLK_SRC_MSI << RCC_CFGR_SWS_POS), SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
     system_clock_val_hz = 4000000UL; /* MSI default frequency after reset */
     
     /* Disable PLL */
-    RCC_CR &= ~RCC_CR_PLLON;
-    if (wait_for_flag_clear(&RCC_CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    RCC->CR &= ~RCC_CR_PLLON;
+    if (wait_for_flag_clear(&RCC->CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
     /* Disable HSI16 */
-    RCC_CR &= ~RCC_CR_HSION;
-    if (wait_for_flag_clear(&RCC_CR, RCC_CR_HSIRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    RCC->CR &= ~RCC_CR_HSION;
+    if (wait_for_flag_clear(&RCC->CR, RCC_CR_HSIRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
     return SYSTEM_CLOCK_OK;
@@ -318,19 +303,19 @@ static int system_clock_set_default(void) {
 
 /* set sysclock to HSI16 */
 static int system_clock_set_hsi16(void) {
-    RCC_CR |= RCC_CR_HSION; /* Enable HSI16 */
-    if (wait_for_flag_set(&RCC_CR, RCC_CR_HSIRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    RCC->CR |= RCC_CR_HSION; /* Enable HSI16 */
+    if (wait_for_flag_set(&RCC->CR, RCC_CR_HSIRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
     
     /* Switch SYSCLK to HSI16 */
-    uint32_t tmp = RCC_CFGR;
+    uint32_t tmp = RCC->CFGR;
     tmp &= ~(RCC_CFGR_SW_MASK); /* clear SW bits */
     tmp |= (SYSCLK_SRC_HSI16 << RCC_CFGR_SW_POS); /* select HSI16 */
-    RCC_CFGR = tmp;
+    RCC->CFGR = tmp;
 
     /* Wait until HSI16 is used as system clock */
-    if (wait_for_reg_mask_eq(&RCC_CFGR, RCC_CFGR_SWS_MASK, (SYSCLK_SRC_HSI16 << RCC_CFGR_SWS_POS), SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    if (wait_for_reg_mask_eq(&RCC->CFGR, RCC_CFGR_SWS_MASK, (SYSCLK_SRC_HSI16 << RCC_CFGR_SWS_POS), SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
     return SYSTEM_CLOCK_OK;
@@ -398,11 +383,11 @@ int system_clock_config_hz(sysclock_hz_t target_hz) {
         }
 
         /* Disable PLL */
-        RCC_CR &= ~RCC_CR_PLLON;
-        if (wait_for_flag_clear(&RCC_CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) return SYSTEM_CLOCK_ERR_TIMEOUT;
+        RCC->CR &= ~RCC_CR_PLLON;
+        if (wait_for_flag_clear(&RCC->CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) return SYSTEM_CLOCK_ERR_TIMEOUT;
 
         /* Configure PLL */
-        uint32_t tmp = RCC_PLLCFGR;
+        uint32_t tmp = RCC->PLLCFGR;
         tmp &= ~RCC_PLLCFGR_PLLSRC_MASK; /* clear PLLSRC bits */
         tmp |= RCC_PLLCFGR_PLLSRC_HSI16; /* HSI16 as PLL source */
         tmp &= ~RCC_PLLCFGR_PLLM_MASK; /* clear PLLM bits */
@@ -412,18 +397,18 @@ int system_clock_config_hz(sysclock_hz_t target_hz) {
         tmp &= ~RCC_PLLCFGR_PLLR_MASK; /* clear PLLR bits */
         tmp |= (pll_cfg.pllr_bits << RCC_PLLCFGR_PLLR_POS) & RCC_PLLCFGR_PLLR_MASK;
         tmp |= RCC_PLLCFGR_PLLREN; /* enable PLLR output */
-        RCC_PLLCFGR = tmp;
+        RCC->PLLCFGR = tmp;
 
         /* Enable PLL */
-        RCC_CR |= RCC_CR_PLLON;
-        if (wait_for_flag_set(&RCC_CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) return SYSTEM_CLOCK_ERR_TIMEOUT;
+        RCC->CR |= RCC_CR_PLLON;
+        if (wait_for_flag_set(&RCC->CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) return SYSTEM_CLOCK_ERR_TIMEOUT;
         /* Switch SYSCLK to PLL */
-        tmp = RCC_CFGR;
+        tmp = RCC->CFGR;
         tmp &= ~(RCC_CFGR_SW_MASK); /* clear SW bits */
         tmp |= (SYSCLK_SRC_PLL << RCC_CFGR_SW_POS); /* select PLL */
-        RCC_CFGR = tmp;
+        RCC->CFGR = tmp;
         /* Wait until PLL is used as system clock */
-        if (wait_for_reg_mask_eq(&RCC_CFGR, RCC_CFGR_SWS_MASK, (SYSCLK_SRC_PLL << RCC_CFGR_SWS_POS), SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) return SYSTEM_CLOCK_ERR_TIMEOUT;
+        if (wait_for_reg_mask_eq(&RCC->CFGR, RCC_CFGR_SWS_MASK, (SYSCLK_SRC_PLL << RCC_CFGR_SWS_POS), SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) return SYSTEM_CLOCK_ERR_TIMEOUT;
         system_clock_val_hz = target_hz;
         return SYSTEM_CLOCK_OK;
     } else {

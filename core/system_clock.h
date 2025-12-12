@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "utils.h"
+#include "device_registers.h"
 
 #ifdef __cplusplus
 extern "C" {
