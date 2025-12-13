@@ -1,4 +1,5 @@
 #include "scheduler.h"
+#include "utils.h"
 
 task_t   task_list[MAX_TASKS];
 task_t  *task_current = NULL;
@@ -97,7 +98,7 @@ int32_t task_create(void (*task_func)(void *), void *arg) {
         return -1;
     }
 
-    uint32_t stat = enter_critical();
+    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
 
     uint32_t unused_task_index = task_count;
     task_t *new_task = &task_list[task_count];
@@ -128,7 +129,7 @@ int32_t task_create(void (*task_func)(void *), void *arg) {
     /* Set stack canary at the bottom of the stack for overflow detection */
     new_task->stack[0] = STACK_CANARY;
 
-    exit_critical(stat);
+    exit_critical_basepri(stat);
 
     return new_task->task_id;
 }
@@ -208,13 +209,13 @@ void task_block(task_t *task) {
         return;
     }
 
-    uint32_t stat = enter_critical();
+    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
 
     if (task->state != TASK_UNUSED && !task->is_idle) {
         task->state = TASK_BLOCKED;
     }
 
-    exit_critical(stat);
+    exit_critical_basepri(stat);
 }
 
 
@@ -224,13 +225,13 @@ void task_unblock(task_t *task) {
         return;
     }
 
-    uint32_t stat = enter_critical();
+    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
 
     if (task->state == TASK_BLOCKED) {
         task->state = TASK_READY;
     }
 
-    exit_critical(stat);
+    exit_critical_basepri(stat);
 }
 
 
@@ -240,13 +241,13 @@ void task_block_current(void) {
         return;
     }
 
-    uint32_t stat = enter_critical();
+    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
 
     if (task_current && task_current->state != TASK_UNUSED && !task_current->is_idle) {
         task_current->state = TASK_BLOCKED;
     }
 
-    exit_critical(stat);
+    exit_critical_basepri(stat);
 
     yield_cpu();
 }
@@ -254,7 +255,7 @@ void task_block_current(void) {
 
 /* Delete a task */
 task_return_t task_delete(uint16_t task_id) {
-    uint32_t stat = enter_critical();
+    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
 
     task_t *task_to_delete = NULL;
     uint32_t task_index = 0;
@@ -268,17 +269,17 @@ task_return_t task_delete(uint16_t task_id) {
     }
 
     if (task_to_delete == NULL) {
-        exit_critical(stat);
+        exit_critical_basepri(stat);
         return TASK_DELETE_TASK_NOT_FOUND;
     }
 
     if (task_to_delete->is_idle) {
-        exit_critical(stat);
+        exit_critical_basepri(stat);
         return TASK_DELETE_IS_IDLE;
     }
     
     if (task_to_delete == task_current) {
-        exit_critical(stat);
+        exit_critical_basepri(stat);
         return TASK_DELETE_IS_CURRENT_TASK; 
     }
 
@@ -286,7 +287,7 @@ task_return_t task_delete(uint16_t task_id) {
     task_to_delete->state = TASK_UNUSED;
     task_to_delete->task_id = 0;
 
-    exit_critical(stat);
+    exit_critical_basepri(stat);
 
     return TASK_DELETE_SUCCESS;
 }
@@ -296,7 +297,7 @@ task_return_t task_delete(uint16_t task_id) {
 void task_check_stack_overflow(void) {
     uint32_t current_task_overflow = 0;
 
-    uint32_t stat = enter_critical();
+    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
 
     for (uint32_t i = 0; i < task_count; ++i) {
         if (task_list[i].state != TASK_UNUSED) {
@@ -305,15 +306,15 @@ void task_check_stack_overflow(void) {
                     current_task_overflow = 1;
                 } else {
                     uint16_t id_to_delete = task_list[i].task_id;
-                    exit_critical(stat);
+                    exit_critical_basepri(stat);
                     task_delete(id_to_delete);
-                    stat = enter_critical();
+                    stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
                 }
             }
         }
     }
 
-    exit_critical(stat);
+    exit_critical_basepri(stat);
 
     if (current_task_overflow) {
         task_exit();
@@ -323,14 +324,14 @@ void task_check_stack_overflow(void) {
 
 /* task voluntarily exits */
 void task_exit(void) {
-    uint32_t stat = enter_critical();
+    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
 
     if (task_current != NULL) {
         task_current->state = TASK_UNUSED;
         task_current->task_id = 0;
     }
 
-    exit_critical(stat);
+    exit_critical_basepri(stat);
 
     while(1) {
         yield_cpu();
@@ -340,7 +341,7 @@ void task_exit(void) {
 
 /* Rearrage active tasks and update their count */
 void task_garbage_collection(void) {
-    uint32_t stat = enter_critical();
+    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
     
     uint32_t read_idx = 0;
     uint32_t write_idx = 0;
@@ -371,7 +372,7 @@ void task_garbage_collection(void) {
     // Clear the unused slots at the end
     memset(&task_list[task_count], 0, (MAX_TASKS - task_count) * sizeof(task_t));
 
-    exit_critical(stat);
+    exit_critical_basepri(stat);
 }
 
 

@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <string.h> /* for memset */
-#include "utils.h"
 #include "device_registers.h"
 
 #ifdef __cplusplus
@@ -21,6 +20,7 @@ extern "C" {
 #define STACK_SIZE_IN_WORDS   255 /* 1020 bytes per task stack for 8-byte alignment */
 #define EXC_RETURN_THREAD_PSP 0xFFFFFFFDu   /* EXC_RETURN: return to Thread mode, use PSP */
 #define STACK_CANARY          0xDEADBEEF
+#define CRITICAL_SECTION_PRIORITY 0x80
 
 typedef enum task_state {
     TASK_UNUSED = 0,
