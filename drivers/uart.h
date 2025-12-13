@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include "device_registers.h"
-#include "utils.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,7 +75,7 @@ typedef struct {
  *
  * @return UART_OK on success, negative error code on failure
  */
-int uart_init(USART_TypeDef *UARTx, const UART_Config_t *config, uint32_t periph_clock_hz);
+int uart_init(USART_t *UARTx, const UART_Config_t *config, uint32_t periph_clock_hz);
 
 /**
  * @brief Send one character.
@@ -85,7 +84,7 @@ int uart_init(USART_TypeDef *UARTx, const UART_Config_t *config, uint32_t periph
  * @param c       Character to send
  * @return UART_OK on success, negative error on timeout/fail
  */
-int uart_send_char(USART_TypeDef *UARTx, char c);
+int uart_send_char(USART_t *UARTx, char c);
 
 /**
  * @brief Send a null-terminated string.
@@ -94,7 +93,7 @@ int uart_send_char(USART_TypeDef *UARTx, char c);
  * @param str     Pointer to string
  * @return UART_OK on success, negative error on failure
  */
-int uart_send_string(USART_TypeDef *UARTx, const char *str);
+int uart_send_string(USART_t *UARTx, const char *str);
 
 /**
  * @brief Receive one character.
@@ -103,7 +102,7 @@ int uart_send_string(USART_TypeDef *UARTx, const char *str);
  * @param result  Pointer to store received character
  * @return UART_OK on success, negative error on failure
  */
-int uart_receive_char(USART_TypeDef *UARTx, char *result);
+int uart_receive_char(USART_t *UARTx, char *result);
 
 /**
  * @brief Receive a line/string into a buffer.
@@ -119,7 +118,7 @@ int uart_receive_char(USART_TypeDef *UARTx, char *result);
  * @param max_length  Max number of bytes to store, including '\0'
  * @return UART_OK on success, negative error on failure
  */
-int uart_receive_string(USART_TypeDef *UARTx, char *buffer, uint32_t max_length);
+int uart_receive_string(USART_t *UARTx, char *buffer, uint32_t max_length);
 
 /**
  * @brief Register a per-UART RX callback (called from ISR when new byte arrives).
@@ -127,37 +126,37 @@ int uart_receive_string(USART_TypeDef *UARTx, char *buffer, uint32_t max_length)
  * @param UARTx UART instance
  * @param cb    Callback function, or NULL to clear
  */
-void uart_set_rx_callback(USART_TypeDef *UARTx, void (*cb)(char c));
+void uart_set_rx_callback(USART_t *UARTx, void (*cb)(char c));
 
 /**
  * @brief Enable or disable RX interrupt (RXNEIE). The actual IRQ must
  * be enabled in the NVIC by the application (this function only toggles
  * the peripheral interrupt enable bit).
  */
-void uart_enable_rx_interrupt(USART_TypeDef *UARTx, int enable);
+void uart_enable_rx_interrupt(USART_t *UARTx, int enable);
 
 /**
  * @brief Read up to `len` bytes from the driver's RX circular buffer.
  * Returns number of bytes actually copied.
  */
-uint32_t uart_read_buffer(USART_TypeDef *UARTx, char *dst, uint32_t len);
+uint32_t uart_read_buffer(USART_t *UARTx, char *dst, uint32_t len);
 
 /**
  * @brief Return number of bytes currently available in RX buffer.
  */
-uint32_t uart_available(USART_TypeDef *UARTx);
+uint32_t uart_available(USART_t *UARTx);
 
 /**
  * @brief Generic handler that should be called from the real IRQ handler
  * corresponding to the USART instance. It handles RXNE and stores bytes
  * in the internal buffer, and invokes callbacks.
  */
-void uart_irq_handler(USART_TypeDef *UARTx);
+void uart_irq_handler(USART_t *UARTx);
 
 /**
  * @brief Track how many bytes have been lost due to RX buffer overflow.
  */
-uint32_t uart_get_overflow_count(USART_TypeDef *UARTx);
+uint32_t uart_get_overflow_count(USART_t *UARTx);
 
 #ifdef __cplusplus
 }

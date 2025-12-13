@@ -1,5 +1,6 @@
 #include <stddef.h>      /* for NULL */
 #include "uart.h"
+#include "utils.h"
 
 /* RCC_AHB2ENR  – AHB2 peripheral clock enable register
  * Bits 3:0 control the clock to GPIOA..GPIOD.
@@ -133,7 +134,7 @@
 #define UART_RX_BUFFER_SIZE  256
 
 /* We track these instances for buffered RX + callbacks. */
-static USART_TypeDef *uart_instances[UART_MAX_INSTANCES];
+static USART_t *uart_instances[UART_MAX_INSTANCES];
 
 static volatile uint8_t  uart_rx_buf[UART_MAX_INSTANCES][UART_RX_BUFFER_SIZE];
 static volatile uint32_t uart_rx_head[UART_MAX_INSTANCES];
@@ -143,7 +144,7 @@ static volatile uint32_t uart_rx_overflow[UART_MAX_INSTANCES];
 static void (*uart_rx_callback[UART_MAX_INSTANCES])(char) = { 0 };
 
 /* Helper: find array index for a given instance */
-static int uart_get_index(USART_TypeDef *UARTx)
+static int uart_get_index(USART_t *UARTx)
 {
     for (int i = 0; i < UART_MAX_INSTANCES; ++i) {
         if (uart_instances[i] == UARTx) {
@@ -154,7 +155,7 @@ static int uart_get_index(USART_TypeDef *UARTx)
 }
 
 /* Helper: register a UART instance and return its index */
-static int uart_register_instance(USART_TypeDef *UARTx)
+static int uart_register_instance(USART_t *UARTx)
 {
     for (int i = 0; i < UART_MAX_INSTANCES; ++i)
     {
@@ -174,7 +175,7 @@ static int uart_register_instance(USART_TypeDef *UARTx)
 }
 
 /* Helper: Enable peripheral clocks and configure GPIO pins for a given UARTx. */
-static void uart_enable_clocks_and_pins(USART_TypeDef *UARTx)
+static void uart_enable_clocks_and_pins(USART_t *UARTx)
 {
     if (UARTx == USART1) {
         /* USART1: PA9 (TX), PA10 (RX), AF7 */
@@ -231,7 +232,7 @@ static void uart_enable_clocks_and_pins(USART_TypeDef *UARTx)
 }
 
 /* initialize UART with full config */
-int uart_init(USART_TypeDef *UARTx, const UART_Config_t *config, uint32_t periph_clock_hz)
+int uart_init(USART_t *UARTx, const UART_Config_t *config, uint32_t periph_clock_hz)
 {
     if ((UARTx == NULL) || (config == NULL) || (config->BaudRate == 0U)) {
         return UART_FAIL;
@@ -357,7 +358,7 @@ int uart_init(USART_TypeDef *UARTx, const UART_Config_t *config, uint32_t periph
 }
 
 /* send a char via uart */
-int uart_send_char(USART_TypeDef *UARTx, char c)
+int uart_send_char(USART_t *UARTx, char c)
 {
     if (UARTx == NULL) {
         return UART_FAIL;
@@ -375,7 +376,7 @@ int uart_send_char(USART_TypeDef *UARTx, char c)
 }
 
 /* send a string via uart. (does NOT send the terminating '\0') */
-int uart_send_string(USART_TypeDef *UARTx, const char *str)
+int uart_send_string(USART_t *UARTx, const char *str)
 {
     if ((UARTx == NULL) || (str == NULL)) {
         return UART_FAIL;
@@ -392,7 +393,7 @@ int uart_send_string(USART_TypeDef *UARTx, const char *str)
 }
 
 /* receive a char via uart */
-int uart_receive_char(USART_TypeDef *UARTx, char *result)
+int uart_receive_char(USART_t *UARTx, char *result)
 {
     if ((UARTx == NULL) || (result == NULL)) {
         return UART_FAIL;
@@ -427,7 +428,7 @@ int uart_receive_char(USART_TypeDef *UARTx, char *result)
 }
 
 /* receive a string via uart. */
-int uart_receive_string(USART_TypeDef *UARTx, char *buffer, uint32_t max_length)
+int uart_receive_string(USART_t *UARTx, char *buffer, uint32_t max_length)
 {
     if ((UARTx == NULL) || (buffer == NULL) || (max_length == 0U)) {
         return UART_FAIL;
@@ -459,7 +460,7 @@ int uart_receive_string(USART_TypeDef *UARTx, char *buffer, uint32_t max_length)
 }
 
 /* Register RX callback */
-void uart_set_rx_callback(USART_TypeDef *UARTx, void (*cb)(char c))
+void uart_set_rx_callback(USART_t *UARTx, void (*cb)(char c))
 {
     int idx = uart_get_index(UARTx);
     if (idx < 0) {
@@ -469,7 +470,7 @@ void uart_set_rx_callback(USART_TypeDef *UARTx, void (*cb)(char c))
 }
 
 /* Enable/disable RX interrupt */
-void uart_enable_rx_interrupt(USART_TypeDef *UARTx, int enable)
+void uart_enable_rx_interrupt(USART_t *UARTx, int enable)
 {
     if (UARTx == NULL) {
         return;
@@ -483,7 +484,7 @@ void uart_enable_rx_interrupt(USART_TypeDef *UARTx, int enable)
 }
 
 /* Return number of bytes in RX buffer */
-uint32_t uart_available(USART_TypeDef *UARTx)
+uint32_t uart_available(USART_t *UARTx)
 {
     int idx = uart_get_index(UARTx);
     if (idx < 0) {
@@ -496,7 +497,7 @@ uint32_t uart_available(USART_TypeDef *UARTx)
 }
 
 /* Read bytes from RX buffer */
-uint32_t uart_read_buffer(USART_TypeDef *UARTx, char *dst, uint32_t len)
+uint32_t uart_read_buffer(USART_t *UARTx, char *dst, uint32_t len)
 {
     int idx = uart_get_index(UARTx);
     if ((idx < 0) || (dst == NULL) || (len == 0U)) {
@@ -514,7 +515,7 @@ uint32_t uart_read_buffer(USART_TypeDef *UARTx, char *dst, uint32_t len)
 }
 
 /* function for IRQ Handlers */
-void uart_irq_handler(USART_TypeDef *UARTx)
+void uart_irq_handler(USART_t *UARTx)
 {
     int idx = uart_get_index(UARTx);
     if (idx < 0) {
@@ -546,7 +547,7 @@ void uart_irq_handler(USART_TypeDef *UARTx)
 
 
 /* Get the number of overflow bytes */
-uint32_t uart_get_overflow_count(USART_TypeDef *UARTx)
+uint32_t uart_get_overflow_count(USART_t *UARTx)
 {
     int idx = uart_get_index(UARTx);
     if (idx < 0) return 0;
