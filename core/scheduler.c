@@ -1,5 +1,9 @@
 #include "scheduler.h"
 #include "utils.h"
+#include "systick.h"  /* For systick_ticks global */
+#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
+#include "heap.h"
+#endif
 
 task_t   task_list[MAX_TASKS];
 task_t  *task_current = NULL;
@@ -16,7 +20,13 @@ void task_create_first(void); /* Forward declaration of the assembly entry */
 /* Idle task function */
 static void task_idle_function(void *arg) {
     (void)arg; /* Unused parameter */
+    static uint32_t last_gc_tick = 0;
     while(1) {
+        /* Run garbage collection */
+        if ((systick_ticks - last_gc_tick) >= GARBAGE_COLLECTION_TICKS) {
+            task_garbage_collection();
+            last_gc_tick = systick_ticks;
+        }
         __WFI(); /* Wait For Interrupt */
     }
 }
@@ -60,7 +70,7 @@ static void task_create_idle(void) {
         return; 
     }
 
-    int32_t task_id = task_create(task_idle_function, NULL);
+    int32_t task_id = task_create(task_idle_function, NULL, STACK_SIZE_512B);
 
     if (task_id < 0) {
         /* Failed to create idle task - this is a critical error */
@@ -93,17 +103,35 @@ void scheduler_init(void) {
 
 
 /* Create a new task */
-int32_t task_create(void (*task_func)(void *), void *arg) {
-    if(task_count >= MAX_TASKS || task_func == NULL) {
+int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_bytes)
+{
+    if (task_count >= MAX_TASKS || task_func == NULL) {
         return -1;
     }
 
-    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
+#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
+    /* Validate and align stack size for dynamic mode */
+    if (stack_size_bytes < STACK_MIN_SIZE_BYTES) {
+        stack_size_bytes = STACK_MIN_SIZE_BYTES;
+    }
+    if (stack_size_bytes > STACK_MAX_SIZE_BYTES) {
+        return -1;  /* Stack too large */
+    }
+    /* Align to 8-byte boundary */
+    stack_size_bytes = (stack_size_bytes + 7) & ~7;
+#else
+    /* In static mode, ignore parameter and use compile-time size */
+    (void)stack_size_bytes;  /* Suppress unused parameter warning */
+    stack_size_bytes = STACK_SIZE_BYTES;
+#endif
 
+    uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
+
+    /* Find unused task slot */
     uint32_t unused_task_index = task_count;
     task_t *new_task = &task_list[task_count];
 
-    for(uint32_t i = 0; i < task_count; ++i) {
+    for (uint32_t i = 0; i < task_count; ++i) {
         if (task_list[i].state == TASK_UNUSED) {
             new_task = &task_list[i];
             unused_task_index = i;
@@ -111,23 +139,43 @@ int32_t task_create(void (*task_func)(void *), void *arg) {
         }
     }
 
-    uint32_t *stack_end = &new_task->stack[STACK_SIZE_IN_WORDS - 1];
+    uint32_t *stack_end = NULL;
+    uint32_t *stack_base = NULL;
 
-    // Explicitly enforce 8-byte alignment
+#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_STATIC
+    /* Static allocation: use embedded stack */
+    stack_base = new_task->stack;
+    stack_end = &new_task->stack[STACK_SIZE_IN_WORDS - 1];
+#else
+    /* Dynamic allocation: allocate stack from heap */
+    stack_base = (uint32_t*)heap_malloc(stack_size_bytes);
+    if (stack_base == NULL) {
+        exit_critical_basepri(stat);
+        return -1;  /* Allocation failed */
+    }
+    new_task->stack_ptr = stack_base;
+    new_task->stack_size = stack_size_bytes;
+    stack_end = (uint32_t*)((uint8_t*)stack_base + stack_size_bytes - sizeof(uint32_t));
+#endif
+
+    /* Enforce 8-byte alignment on stack top */
     uint32_t stack_addr = (uint32_t)stack_end;
     stack_addr &= ~0x7u;
     stack_end = (uint32_t *)stack_addr;
 
+    /* Initialize task */
     new_task->psp = initialize_stack(stack_end, task_func, arg);
     new_task->state = TASK_READY;
     new_task->is_idle = 0;
     new_task->task_id = ++next_task_id;
+    new_task->sleep_until_tick = 0;
+
     if (unused_task_index == task_count) {
         task_count++;
     }
 
-    /* Set stack canary at the bottom of the stack for overflow detection */
-    new_task->stack[0] = STACK_CANARY;
+    /* Set stack canary at the bottom for overflow detection */
+    stack_base[0] = STACK_CANARY;
 
     exit_critical_basepri(stat);
 
@@ -170,10 +218,11 @@ void schedule_next_task(void) {
         task_current->state = TASK_READY;
     }
 
-    /* Simple round-robin: find next READY task */
+    /* Simple round-robin: find next READY task that is not sleeping */
     for (uint32_t i = 0; i < task_count; ++i) {
         if(task_list[next].state == TASK_READY &&
-           task_list[next].is_idle == 0) {
+           task_list[next].is_idle == 0 &&
+           task_list[next].sleep_until_tick == 0) {  /* Not sleeping */
 
             task_current_index = next;
             task_next = &task_list[next];
@@ -209,7 +258,7 @@ void task_block(task_t *task) {
         return;
     }
 
-    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
+    uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
 
     if (task->state != TASK_UNUSED && !task->is_idle) {
         task->state = TASK_BLOCKED;
@@ -225,7 +274,7 @@ void task_unblock(task_t *task) {
         return;
     }
 
-    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
+    uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
 
     if (task->state == TASK_BLOCKED) {
         task->state = TASK_READY;
@@ -241,7 +290,7 @@ void task_block_current(void) {
         return;
     }
 
-    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
+    uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
 
     if (task_current && task_current->state != TASK_UNUSED && !task_current->is_idle) {
         task_current->state = TASK_BLOCKED;
@@ -255,7 +304,7 @@ void task_block_current(void) {
 
 /* Delete a task */
 task_return_t task_delete(uint16_t task_id) {
-    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
+    uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
 
     task_t *task_to_delete = NULL;
     uint32_t task_index = 0;
@@ -283,6 +332,14 @@ task_return_t task_delete(uint16_t task_id) {
         return TASK_DELETE_IS_CURRENT_TASK; 
     }
 
+    /* Free dynamically allocated stack if using dynamic allocation */
+#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
+    if (task_to_delete->stack_ptr != NULL) {
+        heap_free(task_to_delete->stack_ptr);
+        task_to_delete->stack_ptr = NULL;
+    }
+#endif
+
     /* Mark task as unused */
     task_to_delete->state = TASK_UNUSED;
     task_to_delete->task_id = 0;
@@ -297,18 +354,25 @@ task_return_t task_delete(uint16_t task_id) {
 void task_check_stack_overflow(void) {
     uint32_t current_task_overflow = 0;
 
-    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
+    uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
 
     for (uint32_t i = 0; i < task_count; ++i) {
         if (task_list[i].state != TASK_UNUSED) {
-            if (task_list[i].stack[0] != STACK_CANARY) {
+            uint32_t *stack_base = NULL;
+#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_STATIC
+            stack_base = task_list[i].stack;
+#else
+            stack_base = task_list[i].stack_ptr;
+#endif
+            
+            if (stack_base != NULL && stack_base[0] != STACK_CANARY) {
                 if (&task_list[i] == task_current) {
                     current_task_overflow = 1;
                 } else {
                     uint16_t id_to_delete = task_list[i].task_id;
                     exit_critical_basepri(stat);
                     task_delete(id_to_delete);
-                    stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
+                    stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
                 }
             }
         }
@@ -324,7 +388,7 @@ void task_check_stack_overflow(void) {
 
 /* task voluntarily exits */
 void task_exit(void) {
-    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
+    uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
 
     if (task_current != NULL) {
         task_current->state = TASK_UNUSED;
@@ -341,7 +405,7 @@ void task_exit(void) {
 
 /* Rearrage active tasks and update their count */
 void task_garbage_collection(void) {
-    uint32_t stat = enter_critical_basepri(CRITICAL_SECTION_PRIORITY);
+    uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
     
     uint32_t read_idx = 0;
     uint32_t write_idx = 0;
@@ -376,4 +440,56 @@ void task_garbage_collection(void) {
 }
 
 
+/**
+ * @brief Sleep the current task for a specified number of SysTick ticks.
+ * 
+ * The task is moved to BLOCKED state and set to wake up at systick_ticks + ticks.
+ * When the SysTick handler runs and detects the wake-up time has arrived, the task
+ * is automatically moved back to READY state.
+ * 
+ * @param ticks Number of SysTick ticks to sleep (must be > 0)
+ * @return 0 on success, -1 on error
+ */
+int task_sleep_ticks(uint32_t ticks)
+{
+    if (ticks == 0 || task_current == NULL) {
+        return -1;
+    }
+
+    uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
+
+    /* Set the wake-up time */
+    task_current->sleep_until_tick = systick_ticks + ticks;
+
+    /* Block the task */
+    if (task_current->state != TASK_UNUSED && !task_current->is_idle) {
+        task_current->state = TASK_BLOCKED;
+    }
+
+    exit_critical_basepri(stat);
+
+    /* Yield to allow scheduler to pick next task */
+    yield_cpu();
+
+    return 0;
+}
+
+/**
+ * @brief Wake up any sleeping tasks whose wake-up time has arrived.
+ * Called by SysTick_Handler in systick.c.
+ */
+void scheduler_wake_sleeping_tasks(void)
+{
+    /* Check all tasks for wake-up conditions */
+    for (uint32_t i = 0; i < task_count; ++i) {
+        if (task_list[i].state == TASK_BLOCKED && 
+            task_list[i].sleep_until_tick != 0 &&
+            systick_ticks >= task_list[i].sleep_until_tick) {
+            
+            /* Wake up the task */
+            task_list[i].state = TASK_READY;
+            task_list[i].sleep_until_tick = 0;
+        }
+    }
+}
 
