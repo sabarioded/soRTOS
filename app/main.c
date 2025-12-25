@@ -17,13 +17,6 @@ extern uint8_t _end;              /* End of .bss section (start of heap) */
 extern uint32_t __heap_limit__;   /* End of SRAM1 (end of heap) */
 #endif
 
-/* NVIC definitions */
-#define NVIC_BASE                0xE000E100UL
-#define NVIC_ISER0               (*((volatile uint32_t *)(NVIC_BASE + 0x000)))
-#define USART2_IRQn              38
-
-#define SIZE_1KB                1024    
-#define SIZE_2KB                2048
 
 /* ---------- UART2 CLI Wrappers ---------- */
 
@@ -126,15 +119,6 @@ int main(void)
             __asm volatile ("nop");
         }
     }
-    
-    /* Optional: Print heap info for debugging */
-    #ifdef DEBUG
-    heap_stats_t stats;
-    if (heap_get_stats(&stats) == 0) {
-        // Note: CLI not ready yet, so would need different output method
-        // Or move this print after CLI init
-    }
-    #endif
 #endif
     
     /* Initialize scheduler and SysTick (1 kHz tick) */
@@ -148,11 +132,11 @@ int main(void)
     app_commands_register_all();
     
     /* Create application tasks */
-    task_create(task_blink, NULL, SIZE_1KB);
-    task_create(task_button_logger, NULL, SIZE_1KB);
+    task_create(task_blink, NULL, STACK_SIZE_1KB);
+    task_create(task_button_logger, NULL, STACK_SIZE_1KB);
     
     /* Create CLI task */
-    task_create(cli_task_entry, NULL, SIZE_2KB);
+    task_create(cli_task_entry, NULL, STACK_SIZE_2KB);
     
     /* Start the scheduler - does not return */
     scheduler_start();

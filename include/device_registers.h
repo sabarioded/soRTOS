@@ -41,6 +41,8 @@ extern "C" {
 /************* SCB base *****************/
 #define SCB_BASE                (SCS_BASE + 0x0D00UL) /* 0xE000ED00 */
 
+/************* NVIC base *****************/
+#define NVIC_BASE               (SCS_BASE + 0x0100UL) /* 0xE000E100UL */
 
 /************* REGISTER STRUCTURES *****************/
 /************* RCC Registers *****************/
@@ -215,6 +217,10 @@ typedef struct {
 #define SYSTICK   ((SysTick_t *) SYSTICK_BASE)
 
 #define SCB       ((SCB_t *)SCB_BASE)
+
+/************* NVIC definitions *****************/
+#define NVIC_ISER0               (*((volatile uint32_t *)(NVIC_BASE + 0x000)))
+#define USART2_IRQn              38
 
 
 #ifdef __cplusplus

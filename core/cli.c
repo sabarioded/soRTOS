@@ -2,6 +2,7 @@
 #include "scheduler.h" /* For task_sleep_ticks */
 #include <string.h>    /* For strcmp, strlen, memset */
 #include <stdarg.h>    /* For cli_printf variable args */
+#include <project_config.h>
 
 
 static struct {

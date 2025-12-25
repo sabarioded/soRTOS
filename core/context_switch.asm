@@ -20,7 +20,7 @@
 /* Change PendSV to pending */
 .equ SCB_ICSR_PENDSVSET,  (1 << 28)
 
-/* Priorities: use lowest (0xFF) for PendSV & SysTick */
+/* Priorities: use lowest (left-aligned) for PendSV & SysTick (0xF0 for 4 implemented bits) */
 .equ PENDSV_PRIO_SHIFT,   16
 .equ SYSTICK_PRIO_SHIFT,  24
 
@@ -34,20 +34,31 @@ task_create_first:
     LDR r0, =_estack            /* load address of stack into R0 */
     MSR MSP, r0                 /* Copy R0 into the Main Stack Pointer */
 
-    /* set PendSV priority to 0xFF and SysTick priority to 0xFE */
-    LDR r0, =SCB_SHPR3          /* save the address of SCB_SHPR3 in R0 */
-    LDR r1, [r0]                /* load the 32 bit value at SCB_SHPR3 in R1 */
+    /*
+     * Set PendSV and SysTick priorities.
+     * PendSV must be the lowest priority (so it doesn't preempt SysTick or
+     * other kernel-related interrupts). SysTick should be slightly higher
+     * so it can complete its tick handling before a context switch occurs.
+     *
+     * For STM32L4 with 4 implemented priority bits, left-align priorities
+     * into the 8-bit priority fields: e.g., PENDSV=15->0xF0, SYSTICK=14->0xE0.
+     * Do a read-modify-write to clear then set the bytes so previous values
+     * are not left behind.
+     */
+    LDR r0, =SCB_SHPR3          /* address of SCB_SHPR3 */
+    LDR r1, [r0]                /* current SHPR3 value */
 
-    LDR r3, =0xFF00FFFF         /* mask to clear bits [23:16] */
-    AND r1, r1, r3              /* clear bits [23:16] */
-    LDR r3, =0x00FFFFFF         /* mask to clear bits [31:24] */
-    AND r1, r1, r3              /* clear bits [31:24] */
+    /* Set PendSV = 0xF0 (lowest) */
+    MOVS r2, #0xF0                          /* r2 = 0xE0 */
+    BIC r1, r1, r2, LSL #PENDSV_PRIO_SHIFT  /* clear: r1  &= ~(r2 << PENDSV_PRIO_SHIFT) */
+    ORR r1, r1, r2, LSL #PENDSV_PRIO_SHIFT  /* insert: r1 |=  (r2 << PENDSV_PRIO_SHIFT) */
 
-    MOVS r2, #0xFF              /* save the 8bit mask in R2 */
-    ORR r1, r1, r2, LSL #PENDSV_PRIO_SHIFT  /* set PendSV priority byte */
-    MOVS r2, #0xFE              /* save the 8bit mask in R2 */
-    ORR r1, r1, r2, LSL #SYSTICK_PRIO_SHIFT /* set SysTick priority byte */
-    STR r1, [r0]                /* store the updated priority value back to SCB_SHPR3 */
+    /* Set SysTick = 0xE0 (one level higher than PendSV) */
+    MOVS r3, #0xE0                          /* r3 = 0xE0 */
+    BIC r1, r1, r3, LSL #SYSTICK_PRIO_SHIFT /* clear: r1  &= ~(r3 << SYSTICK_PRIO_SHIFT) */
+    ORR r1, r1, r3, LSL #SYSTICK_PRIO_SHIFT /* insert: r1 |=  (r3 << SYSTICK_PRIO_SHIFT) */
+
+    STR r1, [r0]                            /* write back updated SHPR3 */
 
     /* set PSP = task_current->psp so thread mode tasks will use it */
     LDR r0, =task_current       /* r0 = &task_current */
