@@ -578,15 +578,16 @@ void uart_irq_handler(USART_t *UARTx)
         return;
     }
 
+    /* Check & Clear Errors INDEPENDENTLY of RXNE 
+     * This ensures that even if RXNE is 0, we still clear flags so the ISR can exit.
+    */
+    if (UARTx->ISR & (USART_ISR_PE | USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE)) {
+        uart_rx_errors[idx]++;
+        UARTx->ICR = USART_ICR_PECF | USART_ICR_FECF | USART_ICR_NECF | USART_ICR_ORECF;
+    }
+
     if (UARTx->ISR & USART_ISR_RXNE) {
         uint8_t b = (uint8_t)(UARTx->RDR & 0xFFU);
-
-        /* Clear any error flags that may have occurred during reception */
-        uint32_t isr_flags = UARTx->ISR;
-        if (isr_flags & (USART_ISR_PE | USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE)) {
-            uart_rx_errors[idx]++;  /* Track error occurrence */
-            UARTx->ICR = USART_ICR_PECF | USART_ICR_FECF | USART_ICR_NECF | USART_ICR_ORECF;
-        }
 
         /* Put into circular buffer */
         uint32_t head = uart_rx_head[idx];
