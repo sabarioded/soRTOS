@@ -587,6 +587,7 @@ void uart_irq_handler(USART_t *UARTx)
     }
 
     if (UARTx->ISR & USART_ISR_RXNE) {
+        /* read the recieve data register */
         uint8_t b = (uint8_t)(UARTx->RDR & 0xFFU);
 
         /* Put into circular buffer */
