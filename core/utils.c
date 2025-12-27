@@ -40,3 +40,14 @@ void yield_cpu(void) {
     __DSB(); /* Ensures that all explicit memory accesses complete before any instruction after the DSB executes. */
     __ISB(); /* Flushes the processor pipeline and instruction cache. */
 }
+
+int atoi(const char *string) {
+    int res = 0;
+    int interim = 0;
+    while(*string && *string >= '0' && *string <= '9') {
+        interim = *string - '0';
+        res = res * 10 + interim;
+        string++;
+    }
+    return res;
+} 

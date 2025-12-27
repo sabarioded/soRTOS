@@ -147,6 +147,12 @@ static inline void exit_critical_basepri(uint32_t old) {
  */
 void yield_cpu(void);
 
+
+/**
+ * @brief Converts a string of numbers, for example "1234" into an int
+ */
+int atoi(const char *string);
+
 #ifdef __cplusplus
 }
 #endif
