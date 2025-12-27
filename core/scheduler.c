@@ -1,8 +1,8 @@
 #include "scheduler.h"
 #include "utils.h"
-#include "systick.h"  /* For systick_ticks global */
+#include "systick.h" 
 #if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
-#include "heap.h"
+#include "allocator.h"
 #endif
 
 task_t   task_list[MAX_TASKS];
@@ -148,7 +148,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
     stack_end = &new_task->stack[STACK_SIZE_IN_WORDS - 1];
 #else
     /* Dynamic allocation: allocate stack from heap */
-    stack_base = (uint32_t*)heap_malloc(stack_size_bytes);
+    stack_base = (uint32_t*)allocator_malloc(stack_size_bytes);
     if (stack_base == NULL) {
         exit_critical_basepri(stat);
         return -1;  /* Allocation failed */
@@ -332,16 +332,8 @@ int32_t task_delete(uint16_t task_id) {
         return TASK_DELETE_IS_CURRENT_TASK; 
     }
 
-    /* Free dynamically allocated stack if using dynamic allocation */
-#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
-    if (task_to_delete->stack_ptr != NULL) {
-        heap_free(task_to_delete->stack_ptr);
-        task_to_delete->stack_ptr = NULL;
-    }
-#endif
-
-    /* Mark task as unused */
-    task_to_delete->state = TASK_UNUSED;
+    /* Mark task as zombie and free its stack in garbage collection */
+    task_to_delete->state = TASK_ZOMBIE;
     task_to_delete->task_id = 0;
 
     exit_critical_basepri(stat);
@@ -391,7 +383,7 @@ void task_exit(void) {
     uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
 
     if (task_current != NULL) {
-        task_current->state = TASK_UNUSED;
+        task_current->state = TASK_ZOMBIE;
         task_current->task_id = 0;
     }
 
@@ -412,6 +404,16 @@ void task_garbage_collection(void) {
     
     // Find first available slot
     while (read_idx < task_count) {
+        if (task_list[read_idx].state == TASK_ZOMBIE) {
+#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
+            if (task_list[read_idx].stack_ptr != NULL) {
+                allocator_free(task_list[read_idx].stack_ptr);
+                task_list[read_idx].stack_ptr = NULL;
+            }
+            task_list[read_idx].state = TASK_UNUSED;
+#endif
+        }
+
         if (task_list[read_idx].state != TASK_UNUSED) {
             // Found an active task. If it's not where it should be, move it.
             if (read_idx != write_idx) {
@@ -422,6 +424,11 @@ void task_garbage_collection(void) {
                     task_current = &task_list[write_idx];
                     task_current_index = write_idx;
                 }
+
+                if (&task_list[read_idx] == task_next) {
+                    task_next = &task_list[write_idx];
+                }
+
                 if (idle_task == &task_list[read_idx]) {
                     idle_task = &task_list[write_idx];
                 }

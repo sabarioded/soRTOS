@@ -56,6 +56,7 @@ typedef enum task_state {
     TASK_READY,
     TASK_RUNNING,
     TASK_BLOCKED,
+    TASK_ZOMBIE,
 } task_state_t;
 
 typedef enum task_return {
