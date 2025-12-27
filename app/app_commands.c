@@ -2,15 +2,15 @@
 #include "cli.h"
 #include "scheduler.h"
 #include "stm32_alloc.h"
-#include <string.h>
-
-#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
-#include "utils.h"  /* For string to number conversion */
-#endif
+#include "systick.h"
+#include "utils.h"
 
 /* Forward declarations */
 static int cmd_heap_stats_handler(int argc, char **argv);
 static int cmd_task_list_handler(int argc, char **argv);
+static int cmd_uptime_handler(int argc, char **argv);
+static int cmd_kill_handler(int argc, char **argv);
+static int cmd_reboot_handler(int argc, char **argv);
 
 /* Command definitions */
 static const cli_command_t heap_stats_cmd = {
@@ -23,6 +23,24 @@ static const cli_command_t task_list_cmd = {
     .name = "tasks",
     .help = "List all tasks",
     .handler = cmd_task_list_handler
+};
+
+static const cli_command_t uptime_cmd = {
+    .name = "uptime",
+    .help = "How long the system is up",
+    .handler = cmd_uptime_handler
+};
+
+static const cli_command_t kill_cmd = {
+    .name = "kill",
+    .help = "kill <task_id> : kill a task",
+    .handler = cmd_kill_handler
+};
+
+static const cli_command_t reboot_cmd = {
+    .name = "reboot",
+    .help = "reboot the system",
+    .handler = cmd_reboot_handler
 };
 
 /* Command handlers */
@@ -108,10 +126,79 @@ static int cmd_task_list_handler(int argc, char **argv)
     return 0;
 }
 
+static int cmd_uptime_handler(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+
+    /* every tick is 1ms */
+    uint32_t ticks = systick_ticks;
+    uint32_t seconds = ticks / 1000;
+    uint32_t mili_sec = ticks % 1000;
+
+    /* every 60sec is a minute*/
+    uint32_t minutes = seconds / 60;
+    seconds = seconds % 60;
+
+    /* every 60 minutes is an hour */
+    uint32_t hours = minutes / 60;
+    minutes = minutes % 60;
+
+    /* every 24 hours is a day*/
+    uint32_t days = hours / 24;
+    hours = hours % 24;
+
+    cli_printf("Uptime: %u Days, %u Hours, %u Minutes, %u Seconds.%u\r\n",
+                        days,    hours,    minutes,    seconds,   mili_sec);
+
+    return 0;
+}
+
+
+static int cmd_kill_handler(int argc, char **argv) {
+    if (argc < 2) {
+        cli_printf("Usage: kill <id>\r\n");
+        return -1;
+    }
+
+    uint16_t task_id = (uint16_t)atoi(argv[1]);
+    int32_t result = task_delete(task_id);
+
+    /* 2. User Feedback */
+    if (result == TASK_DELETE_SUCCESS) {
+        cli_printf("Task %u killed.\r\n", task_id);
+    } else if (result == TASK_DELETE_TASK_NOT_FOUND) {
+        cli_printf("Error: Task %u not found.\r\n", task_id);
+    } else {
+        cli_printf("Error: Could not kill task %u (Code %d).\r\n", task_id, result);
+    }
+    return 0;
+}
+
+
+static int cmd_reboot_handler(int argc, char **argv) {
+    (void)argc; (void)argv;
+    cli_printf("Rebooting system...\r\n");
+    
+    /* Standard Cortex-M reset: Write 0x5FA to AIRCR with SYSRESETREQ bit */
+    #define SCB_AIRCR_SYSRESETREQ_MASK (1 << 2)
+    #define SCB_AIRCR_VECTKEY_POS      16U
+    #define SCB_AIRCR_VECTKEY_VAL      0x05FA
+    
+    SCB->AIRCR = (SCB_AIRCR_VECTKEY_VAL << SCB_AIRCR_VECTKEY_POS) | 
+                 SCB_AIRCR_SYSRESETREQ_MASK;
+                 
+    while(1); /* Wait for hardware reset */
+    return 0;
+}
+
+
 /* Register all commands */
 void app_commands_register_all(void)
 {
     cli_register_command(&heap_stats_cmd);
     cli_register_command(&task_list_cmd);
+    cli_register_command(&uptime_cmd);
+    cli_register_command(&kill_cmd);
+    cli_register_command(&reboot_cmd);
 }
 
