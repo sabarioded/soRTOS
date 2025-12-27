@@ -26,6 +26,28 @@ typedef struct Block {
 static Block* head = NULL;
 static size_t mem_capacity = 0;
 static size_t free_mem = 0;
+static size_t allocated_mem = 0;
+static size_t free_blocks = 0;
+static size_t allocated_blocks = 0;
+
+static Block* allocator_get_largest_free_block(void) {
+    Block* curr = head;
+    Block* largest_block = NULL;
+    size_t largest_free = 0;
+    while (curr) {
+        size_t size = GET_SIZE(curr->size_and_free);
+        int is_free = GET_FREE(curr->size_and_free);
+
+        if (is_free) {
+            if (size > largest_free) {
+                largest_free = size;
+                largest_block = curr;
+            }
+        } 
+        curr = curr->next;
+    }
+    return largest_block;
+}
 
 void allocator_init(uint8_t* pool, size_t size) {
     /* Ensure the start of the pool is aligned */
@@ -45,6 +67,9 @@ void allocator_init(uint8_t* pool, size_t size) {
     // Mark as FREE (Bit 0 = 1)
     head->size_and_free = UPDATE_SIZE_AND_FREE(usable_size, IS_FREE_MASK);
     head->next = NULL;
+
+    free_blocks = 1;
+    allocated_blocks = 0;
 }
 
 void* allocator_malloc(size_t size) {
@@ -59,7 +84,7 @@ void* allocator_malloc(size_t size) {
             /* Check if we can split the current block. need space for header+data+*/
             if (curr_size >= (aligned_size + sizeof(Block) + ALIGN_SIZE)) {
                 /* start of the next block (the data) + the size of data the user requested. */
-                Block* next_block = (Block*)((uint8_t*)(curr + 1) + size);
+                Block* next_block = (Block*)((uint8_t*)(curr + 1) + aligned_size);
                 
                 /* Calculate remaining size for the new block */
                 size_t remaining_size = curr_size - aligned_size - sizeof(Block);
@@ -71,10 +96,17 @@ void* allocator_malloc(size_t size) {
                 /* Update current block */
                 curr->next = next_block;
                 curr_size = aligned_size;
+                
+                /* update stats */
                 free_mem -= (aligned_size + sizeof(Block));
+                allocated_mem += aligned_size;
+                allocated_blocks++;
             } else {
                 /* header already allocated */
                 free_mem -= curr_size;
+                allocated_mem += curr_size;
+                free_blocks--;
+                allocated_blocks++;
             }
 
             curr->size_and_free = UPDATE_SIZE_AND_FREE(curr_size, NOT_FREE_MASK);
@@ -91,7 +123,11 @@ void allocator_free(void* ptr) {
     /* Free the requested block (its before the data) */
     Block* block_to_free = (Block*)ptr - 1;
     block_to_free->size_and_free |= IS_FREE_MASK;
-    free_mem += GET_SIZE(block_to_free->size_and_free);
+    size_t block_mem = GET_SIZE(block_to_free->size_and_free);
+    free_mem += block_mem;
+    allocated_mem -= block_mem;
+    free_blocks++;
+    allocated_blocks--;
 
     /* Merge free blocks */
     Block* curr = head;
@@ -99,6 +135,7 @@ void allocator_free(void* ptr) {
         if (GET_FREE(curr->size_and_free) && GET_FREE(curr->next->size_and_free)) {
             /* The next block's header is now usable memory */
             free_mem += sizeof(Block);
+            free_blocks--;
 
             /* size of the current block + the next block + its size */
             size_t merged_size = GET_SIZE(curr->size_and_free) + 
@@ -138,7 +175,8 @@ void* allocator_realloc(void* ptr, size_t new_size) {
 
             block->size_and_free = UPDATE_SIZE_AND_FREE(aligned_new, NOT_FREE_MASK);
             free_mem += remaining_size; 
-            
+            allocated_mem -= (remaining_size + sizeof(Block));
+            free_blocks++;
         }
         return ptr;
     } 
@@ -160,39 +198,89 @@ size_t allocator_get_free_size(void) {
 }
 
 size_t allocator_get_fragment_count(void) {
-    Block* curr = head;
-    size_t fgmt_cnt = 0;
-    while(curr) {
-        if(GET_FREE(curr->size_and_free)) {
-            fgmt_cnt++;
-        }
-        curr = curr->next;
-    }
-    return fgmt_cnt;
+    return free_blocks;
 }
 
-void allocator_dump_stats(int (*print_fn)(const char*, ...)) {
-    if (!print_fn) return;
+int allocator_get_stats(heap_stats_t *stats) {
+    if (stats == NULL) {
+        return -1;
+    }
+    
+    if (head == NULL) {
+        /* Allocator not initialized yet */
+        stats->total_size = 0;
+        stats->used_size = 0;
+        stats->free_size = 0;
+        stats->largest_free_block = 0;
+        stats->allocated_blocks = 0;
+        stats->free_blocks = 0;
+        return -1;
+    }
 
+    /* Get the global stats*/
+    stats->total_size       = mem_capacity;
+    stats->free_size        = free_mem;
+    stats->used_size        = stats->total_size - stats->free_size;
+    stats->allocated_blocks = allocated_blocks;
+    stats->free_blocks      = free_blocks;
+
+    /* Calculate the largest free block */
+    Block* largest_free_block = allocator_get_largest_free_block();
+    if(largest_free_block) {
+        stats->largest_free_block = GET_SIZE(largest_free_block->size_and_free);
+    } else {
+        stats->largest_free_block = 0;
+    }
+
+    return 0;
+}
+
+int allocator_check_integrity(void) {
+    if (!head) return -1; /* Not initialized */
+
+    size_t calculated_free = 0;
+    size_t allocated_size = 0;
     Block* curr = head;
-    print_fn("\r\n--- STM32 HEAP MAP ---\r\n");
-    print_fn("Capacity: %zu bytes | Free: %zu bytes\r\n", mem_capacity, free_mem);
-    print_fn("------------------------------------------\r\n");
+    Block* prev = NULL;
+    
+    /* We need boundaries to check if pointers are valid */
+    uintptr_t heap_start = (uintptr_t)head;
+    uintptr_t heap_end   = heap_start + mem_capacity;
 
-    int i = 0;
     while (curr) {
+        /* The current block must be within heap limits. */
+        if ((uintptr_t)curr < heap_start || (uintptr_t)curr >= heap_end) {
+            return -1;
+        }
+
         size_t size = GET_SIZE(curr->size_and_free);
         int is_free = GET_FREE(curr->size_and_free);
-        
-        // Print block index, status, payload size, and the payload start address
-        print_fn("[%d] %s | Size: %zu | Data Addr: %p\r\n", 
-                 i++, 
-                 is_free ? "FREE" : "USED", 
-                 size, 
-                 (void*)(curr + 1)); // Points to the actual user memory
-                 
+
+        /* A block cannot be larger than the entire heap. */
+        if (size > mem_capacity) {
+            return -1;
+        }
+
+        if (is_free) {
+            calculated_free += size;
+        } else {
+            allocated_size += size;
+        }
+
+        prev = curr;
         curr = curr->next;
     }
-    print_fn("------------------------------------------\r\n");
-    print_fn("Fragment Count: %zu\r\n", allocator_get_fragment_count());
+
+    /* The sum of free blocks found must match the global counter. */
+    if (calculated_free != free_mem) {
+        return -1;
+    }
+
+    /* The sum of allocated blocks found must match the global counter. */
+    if (allocated_size != allocated_mem) {
+        return -1;
+    }
+
+    return 0; /* Integrity OK */
 }
+

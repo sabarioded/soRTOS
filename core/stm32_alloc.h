@@ -18,6 +18,7 @@ void  stm32_allocator_free(void* ptr);
 void* stm32_allocator_realloc(void* ptr, size_t new_size);
 size_t stm32_allocator_get_free_size(void);
 size_t stm32_allocator_get_fragment_count(void);
-void  stm32_allocator_dump_stats(int (*print_fn)(const char*, ...));
+int  stm32_allocator_get_stats(heap_stats_t *stats);
+int stm32_allocator_check_integrity(void);
 
 #endif /* STM32_ALLOC_H */

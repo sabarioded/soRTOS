@@ -43,8 +43,16 @@ size_t stm32_allocator_get_fragment_count(void) {
     return fgmnt_cnt;
 }
 
-void stm32_allocator_dump_stats(int (*print_fn)(const char*, ...)) {
+int stm32_allocator_get_stats(heap_stats_t *stats) {
     uint32_t status = enter_critical_basepri(ALLOCATOR_PRIORITY_THRESHOLD);
-    allocator_dump_stats(print_fn);
+    int status = allocator_get_stats(stats);
     exit_critical_basepri(status);
+    return status;
+}
+
+int stm32_allocator_check_integrity(void) {
+    uint32_t status = enter_critical_basepri(ALLOCATOR_PRIORITY_THRESHOLD);
+    int status = allocator_check_integrity();
+    exit_critical_basepri(status);
+    return status;
 }

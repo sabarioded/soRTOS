@@ -4,6 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef struct heap_stats {
+    size_t total_size;
+    size_t used_size;
+    size_t free_size;
+    size_t largest_free_block;
+    size_t allocated_blocks;
+    size_t free_blocks;
+} heap_stats_t;
+
 /**
  * @brief Initializes the memory pool.
  * Sets up the initial free block and aligns the starting address to the 
@@ -54,11 +63,18 @@ size_t allocator_get_free_size(void);
 size_t allocator_get_fragment_count(void);
 
 /**
- * @brief Prints a visual representation of the heap to the console.
- * Useful for debugging. Displays block status (USED/FREE), sizes, 
- * and memory addresses.
+ * @brief  Populates the stats structure with current heap state.
+ * @param  stats Pointer to a heap_stats_t struct to fill.
+ * @return 0 on success, -1 if heap not initialized or stats is NULL.
  */
-void allocator_dump_stats(int (*print_fn)(const char*, ...));
+int allocator_get_stats(heap_stats_t *stats);
+
+/**
+ * @brief Verify the integrity of the heap.
+ * 
+ * @return 0 on success, -1 if heap not initialized or theres an issue. 
+ */
+int allocator_check_integrity(void);
 
 
 #endif
