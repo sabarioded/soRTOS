@@ -219,8 +219,9 @@ typedef struct {
 #define SCB       ((SCB_t *)SCB_BASE)
 
 /************* NVIC definitions *****************/
-#define NVIC_ISER0               (*((volatile uint32_t *)(NVIC_BASE + 0x000)))
-#define USART2_IRQn              38
+#define NVIC_ISER0              (*((volatile uint32_t *)(NVIC_BASE + 0x000)))
+#define NVIC_ISER1              (*((volatile uint32_t *)(NVIC_BASE + 0x004)))
+#define USART2_IRQn             38
 
 
 #ifdef __cplusplus

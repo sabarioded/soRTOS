@@ -58,7 +58,7 @@ static void cli_process_cmd(void) {
         cli_ctx.puts(cli_ctx.prompt);
         return;
     } else {
-        for(int i = 0; i < cli_ctx.cmd_count; i++) {
+        for(uint32_t i = 0; i < cli_ctx.cmd_count; i++) {
             if(strcmp(argv[0], cli_ctx.commands[i].name) == 0) {
                 cli_ctx.commands[i].handler(argc, argv);
                 found = 1;

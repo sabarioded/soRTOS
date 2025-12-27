@@ -241,7 +241,6 @@ int allocator_check_integrity(void) {
     size_t calculated_free = 0;
     size_t allocated_size = 0;
     Block* curr = head;
-    Block* prev = NULL;
     
     /* We need boundaries to check if pointers are valid */
     uintptr_t heap_start = (uintptr_t)head;
@@ -267,7 +266,6 @@ int allocator_check_integrity(void) {
             allocated_size += size;
         }
 
-        prev = curr;
         curr = curr->next;
     }
 

@@ -2,7 +2,7 @@
 #define SCHEDULER_H
 
 #include <stdint.h>
-#include <string.h> /* for memset */
+#include <stddef.h>
 #include "device_registers.h"
 #include "project_config.h"
 

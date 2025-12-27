@@ -307,12 +307,10 @@ int32_t task_delete(uint16_t task_id) {
     uint32_t stat = enter_critical_basepri(MAX_SYSCALL_PRIORITY);
 
     task_t *task_to_delete = NULL;
-    uint32_t task_index = 0;
 
     for (uint32_t i = 0; i < task_count; ++i) {
         if (task_list[i].task_id == task_id) {
             task_to_delete = &task_list[i];
-            task_index = i;
             break;
         }
     }

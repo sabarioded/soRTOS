@@ -159,31 +159,26 @@ SECTIONS
 
   /* ============================================================================
      Heap Section (Remainder of SRAM1)
-     This section exists only for map file visualization.
-     The actual heap is managed by heap_init() and heap_malloc().
-     
-     Heap extends from '_end' to '__heap_limit__' (end of SRAM1).
-     Typical size: ~92 KB (96 KB SRAM1 minus .data/.bss overhead)
-  ============================================================================ */
+     We define the start symbol here. The end symbol is simply the limit of SRAM1.
+     We DO NOT force '.' to move to the end, preventing the overflow error.
+   ============================================================================ */
   .heap (NOLOAD) :
   {
-    . = ALIGN(8);         /* 8-byte alignment for malloc */
-    __heap_start__ = .;   /* Same as _end */
-    . = __heap_limit__;   /* Extend to end of SRAM1 */
-    __heap_end__ = .;
+    . = ALIGN(8);
+    __heap_start__ = .;
+    /* We do not move '.' here. We just define the end symbol for the C code. */
+    __heap_end__ = __heap_limit__;
   } > SRAM1
 
   /* ============================================================================
      MSP Stack Section (SRAM2)
-     This section exists only for map file visualization.
-     MSP grows downward from _estack (top of SRAM2).
-  ============================================================================ */
+   ============================================================================ */
   .msp_stack (NOLOAD) :
   {
     . = ALIGN(8);
     __msp_stack_bottom__ = .;
-    . = __msp_stack_end__;
-    __msp_stack_top__ = .;
+    /* Again, just define the symbol, don't move the dot */
+    __msp_stack_top__ = __msp_stack_end__;
   } > SRAM2
 
   /* Discard debugging sections */
@@ -232,3 +227,4 @@ SECTIONS
        heap_start = (uint32_t)&_end;
        heap_end = (uint32_t)&__heap_limit__;
    }
+==============================================================================*/

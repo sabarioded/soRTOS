@@ -29,22 +29,13 @@
 
 
 /* Set up and start the first task */
+.type task_create_first, %function
 task_create_first:
     /* set the Main Stack pointer to the top of the ISR stack */
     LDR r0, =_estack            /* load address of stack into R0 */
     MSR MSP, r0                 /* Copy R0 into the Main Stack Pointer */
 
-    /*
-     * Set PendSV and SysTick priorities.
-     * PendSV must be the lowest priority (so it doesn't preempt SysTick or
-     * other kernel-related interrupts). SysTick should be slightly higher
-     * so it can complete its tick handling before a context switch occurs.
-     *
-     * For STM32L4 with 4 implemented priority bits, left-align priorities
-     * into the 8-bit priority fields: e.g., PENDSV=15->0xF0, SYSTICK=14->0xE0.
-     * Do a read-modify-write to clear then set the bytes so previous values
-     * are not left behind.
-     */
+    /* Setup Priorities (PendSV lowest) */
     LDR r0, =SCB_SHPR3          /* address of SCB_SHPR3 */
     LDR r1, [r0]                /* current SHPR3 value */
 
@@ -72,12 +63,19 @@ task_create_first:
     MSR CONTROL, r0             /* CONTROL = 0x2 */
     ISB                         /* instruction sync barrier */
 
-    /* perform an exception return to start the first task */
-    LDR r0, =EXC_RETURN_THREAD_PSP  /* load EXC_RETURN value into R0 */
-    BX r0                           /* branch to EXC_RETURN value to start the first task */
+    /* Manually pop hardware frame */
+    POP {r0-r3}       /* Pop R0 (arg), R1, R2, R3 */
+    POP {r4}          /* Pop R12 (garbage) into R4 */
+    POP {lr}          /* Pop LR (Return Address / Error Handler) */
+    POP {r5}          /* Pop PC (Task Entry Point) into R5 */
+    POP {r6}          /* Pop xPSR (Status Reg) into R6 */
+
+    /* Jump to the task */
+    BX  r5            /* Jump to the address we popped into R5 */
 
 
 /* Perform a context switch */
+.type PendSV_Handler, %function
 PendSV_Handler:
     /* first we need to save the task context in the stack */
     MRS r0, PSP                 /* r0 = PSP */

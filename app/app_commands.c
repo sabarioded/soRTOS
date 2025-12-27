@@ -12,7 +12,9 @@ static int cmd_uptime_handler(int argc, char **argv);
 static int cmd_kill_handler(int argc, char **argv);
 static int cmd_reboot_handler(int argc, char **argv);
 
+#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
 /******************* For heap test *******************/
+static int cmd_heap_test_handler(int argc, char **argv);
 /* Pseudo-random number generator for stress testing */
 static uint32_t prng_state = 1234;
 static uint32_t mini_rand(void) {
@@ -44,6 +46,7 @@ static int verify_pattern(uint8_t *ptr, size_t size) {
     } \
 } while(0)
 /****************************************************/
+#endif
 
 /* Command definitions */
 static const cli_command_t heap_stats_cmd = {
@@ -92,7 +95,7 @@ static int cmd_heap_stats_handler(int argc, char **argv)
 
 #if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
     heap_stats_t stats;
-    if (stm32_allocator_dump_stats(&stats) == 0) {
+    if (stm32_allocator_get_stats(&stats) == 0) {
         cli_printf("Heap Statistics:\r\n");
         cli_printf("  Total size:     %u bytes\r\n", (unsigned int)stats.total_size);
         cli_printf("  Used:           %u bytes\r\n", (unsigned int)stats.used_size);
@@ -147,15 +150,13 @@ static int cmd_task_list_handler(int argc, char **argv)
                 default:            state_str = "UNKNOWN"; break;
             }
 
-            cli_printf("%-3u  %-9s  ", task_list[i].task_id, state_str);
-
 #if TASK_STACK_ALLOC_MODE == TASK_ALLOC_STATIC
-            cli_printf("Static (embedded)\r\n");
+            cli_printf("%u   %s      STATIC\r\n", task_list[i].task_id, state_str);
 #else
             if (task_list[i].stack_ptr != NULL) {
-                cli_printf("0x%08x (heap)\r\n", (unsigned int)task_list[i].stack_ptr);
+                cli_printf("%u   %s      %x\r\n", task_list[i].task_id, state_str, (unsigned int)task_list[i].stack_ptr);
             } else {
-                cli_printf("NULL\r\n");
+                cli_printf("Error loacting memory");
             }
 #endif
             count++;
@@ -245,12 +246,21 @@ static int cmd_heap_test_handler(int argc, char **argv) {
 
     const char *mode = argv[1];
 
+    /* Capture baseline stats to account for system tasks */
+    heap_stats_t base_stats;
+    stm32_allocator_get_stats(&base_stats);
+    size_t baseline_blocks = base_stats.allocated_blocks;
+
     /* ==========================================
      * MODE: BASIC (Integrity & Realloc)
      * ========================================== */
     if (strcmp(mode, "basic") == 0) {
         if (argc < 3) { cli_printf("Size required.\r\n"); return -1; }
         size_t size = (size_t)atoi(argv[2]);
+        if (size == 0) {
+             cli_printf("Invalid size (0 or not a number): %s\r\n", argv[2]);
+             return -1;
+        }
         
         cli_printf("1. Allocating %u bytes...\r\n", size);
         uint8_t *ptr = stm32_allocator_malloc(size);
@@ -313,7 +323,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
         /* Get stats to see if we have fragments */
         heap_stats_t stats;
         stm32_allocator_get_stats(&stats);
-        cli_printf("   Fragments: %u (Expect > 1)\r\n", stats.free_blocks);
+        cli_printf("   Fragments: %u (Expect > 1)\r\n", (unsigned int)stats.free_blocks);
 
         cli_printf("3. Freeing remaining blocks to force coalescing...\r\n");
         stm32_allocator_free(ptrs[0]);
@@ -324,11 +334,13 @@ static int cmd_heap_test_handler(int argc, char **argv) {
         
         /* Verify everything merged back */
         stm32_allocator_get_stats(&stats);
-        if (stats.allocated_blocks == 0 && stats.free_blocks == 1) {
+        
+        /* We expect allocated_blocks to return to baseline, and free_blocks to be 1 */
+        if (stats.allocated_blocks == baseline_blocks && stats.free_blocks == 1) {
              cli_printf("[PASS] Coalescing working (1 large free block).\r\n");
         } else {
-             cli_printf("[FAIL] Coalescing failed! Blocks: %u, Frags: %u\r\n", 
-                        stats.allocated_blocks, stats.free_blocks);
+             cli_printf("[FAIL] Coalescing failed! Blocks: %u (Base: %u), Frags: %u\r\n", 
+                        (unsigned int)stats.allocated_blocks, (unsigned int)baseline_blocks, (unsigned int)stats.free_blocks);
         }
     }
 

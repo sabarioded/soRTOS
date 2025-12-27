@@ -123,25 +123,22 @@
 #define USART_CR2_STOP_Pos  (12)
 #define USART_CR2_STOP_Msk  (3UL << USART_CR2_STOP_Pos)  // STOP field mask (00: 1 stop bit, 10: 2 stop bits)
 
-
 /* GPIO helper macro: set pin to AF mode and select AF number */
 #define GPIO_SET_AF(GPIOx, pin, af) do {                          \
     /* Clear mode bits for this pin */                            \
-    (GPIOx)->MODER &= ~(3UL << ((pin) * 2));                      \
+    (GPIOx)->MODER &= ~(3UL << ((pin) * 2U));                     \
     /* Set to AF mode (0b10) */                                   \
-    (GPIOx)->MODER |=  (2UL << ((pin) * 2));                      \
+    (GPIOx)->MODER |=  (2UL << ((pin) * 2U));                     \
+                                                                  \
     if ((pin) < 8U) {                                             \
         /* AFR[0] is used for pins 0..7 */                        \
-        /* Clear AF bits for this pin */                          \
-        (GPIOx)->AFR[0] &= ~(0xFUL << ((pin) * 4));               \
-        /* Set AF number (0..15) */                               \
-        (GPIOx)->AFR[0] |=  ((af) << ((pin) * 4));                \
+        /* Use (pin & 7) to ensure shift is always safe (0..28) */ \
+        (GPIOx)->AFR[0] &= ~(0xFUL << (((pin) & 7U) * 4U));       \
+        (GPIOx)->AFR[0] |=  ((af)  << (((pin) & 7U) * 4U));       \
     } else {                                                      \
         /* AFR[1] is used for pins 8..15 */                       \
-        /* Clear AF bits for this pin */                          \
-        (GPIOx)->AFR[1] &= ~(0xFUL << (((pin) - 8U) * 4));        \
-        /* Set AF number (0..15) */                               \
-        (GPIOx)->AFR[1] |=  ((af) << (((pin) - 8U) * 4));         \
+        (GPIOx)->AFR[1] &= ~(0xFUL << (((pin) & 7U) * 4U));       \
+        (GPIOx)->AFR[1] |=  ((af)  << (((pin) & 7U) * 4U));       \
     }                                                             \
 } while (0)
 
@@ -694,11 +691,7 @@ uint32_t uart_write_buffer(USART_t *UARTx, const char *src, uint32_t len) {
         sent++;
     }
 
-    // if data was sent enable TX interrupt */
-    if (sent > 0) {
-        UARTx->CR1 |= USART_CR1_TXEIE;
-    }
-
+    UARTx->CR1 |= USART_CR1_TXEIE;
     /* Exit Critical Section */
     exit_critical_basepri(basepri_state);
 

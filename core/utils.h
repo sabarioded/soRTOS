@@ -2,7 +2,9 @@
 #define UTILS_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include "device_registers.h"
+#include "project_config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,8 +13,6 @@ extern "C" {
 #define NULL ((void *)0)
 #define __WFI()         __asm volatile ("wfi")
 #define KERNEL_NOP()    __asm volatile ("nop")
-
-#define MAX_SYSCALL_PRIORITY     0x80
 
 /**
  * @brief   Data Synchronization Barrier (DSB).
@@ -152,6 +152,12 @@ void yield_cpu(void);
  * @brief Converts a string of numbers, for example "1234" into an int
  */
 int atoi(const char *string);
+
+void *memset(void *s, int c, size_t n);
+
+void *memcpy(void *dest, const void *src, size_t n);
+
+int strcmp(const char *s1, const char *s2);
 
 #ifdef __cplusplus
 }

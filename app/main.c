@@ -10,6 +10,7 @@
 #include "device_registers.h"
 #include "project_config.h"
 #include "app_commands.h"
+#include "utils.h"
 #if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
 #include "stm32_alloc.h"
 /* Linker script symbols for heap */
@@ -63,9 +64,9 @@ static void task_button_logger(void *arg)
     (void)arg;
     button_init();
 
-    uint8_t prev_btn = 0;
+    uint32_t prev_btn = 0;
     while (1) {
-        uint8_t btn = button_is_pressed();
+        uint32_t btn = button_read();
 
         if (btn && !prev_btn) {
             cli_printf("Button pressed\r\n");
@@ -98,9 +99,9 @@ int main(void)
     /* USART2 is on APB1, which runs at the same frequency as SYSCLK (80 MHz) */
     uint32_t pclk1_hz = get_system_clock_hz();
     uart_init(USART2, &uart_config, pclk1_hz);
-    
+
     /* Enable UART2 interrupts in NVIC */
-    NVIC_ISER0 |= (1UL << (USART2_IRQn & 0x1F));
+    NVIC_ISER1 |= (1UL << (USART2_IRQn & 0x1F));
     
     /* Enable RX interrupt for buffered reception */
     uart_enable_rx_interrupt(USART2, 1);
@@ -135,7 +136,7 @@ int main(void)
     
     /* Start the scheduler - does not return */
     scheduler_start();
-
+    
     /* Should never reach here */
     while (1) {
         KERNEL_NOP();
