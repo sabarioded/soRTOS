@@ -1,8 +1,5 @@
 #include "utils.h"
 
-#define SCB_ICSR_PENDSVSET_Pos  28u
-#define SCB_ICSR_PENDSVSET_Msk  (1u << SCB_ICSR_PENDSVSET_Pos)
-
 
 int wait_for_flag_set(volatile uint32_t *reg, uint32_t mask, uint32_t max_iter)
 {
@@ -34,13 +31,6 @@ int wait_for_reg_mask_eq(volatile uint32_t *reg, uint32_t mask, uint32_t expecte
 }
 
 
-void yield_cpu(void) {
-    SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk; 
-    
-    __DSB(); /* Ensures that all explicit memory accesses complete before any instruction after the DSB executes. */
-    __ISB(); /* Flushes the processor pipeline and instruction cache. */
-}
-
 int atoi(const char *string) {
     int res = 0;
     int interim = 0;
@@ -52,6 +42,7 @@ int atoi(const char *string) {
     return res;
 }
 
+
 void *memset(void *s, int c, size_t n) {
     unsigned char *p = s;
     while (n--) {
@@ -59,6 +50,7 @@ void *memset(void *s, int c, size_t n) {
     }
     return s;
 }
+
 
 void *memcpy(void *dest, const void *src, size_t n) {
     unsigned char *d = dest;
@@ -68,6 +60,7 @@ void *memcpy(void *dest, const void *src, size_t n) {
     }
     return dest;
 }
+
 
 int strcmp(const char *s1, const char *s2) {
     while (*s1 && (*s1 == *s2)) {

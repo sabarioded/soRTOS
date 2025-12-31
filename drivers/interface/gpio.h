@@ -1,0 +1,83 @@
+#ifndef GPIO_H
+#define GPIO_H
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief GPIO Port identifiers.
+ */
+typedef enum {
+    GPIO_PORT_A,
+    GPIO_PORT_B,
+    GPIO_PORT_C,
+    GPIO_PORT_D,
+    GPIO_PORT_E,
+    GPIO_PORT_H,
+    GPIO_PORT_MAX
+} gpio_port_t;
+
+/**
+ * @brief GPIO Pin Modes.
+ */
+typedef enum {
+    GPIO_MODE_INPUT = 0,
+    GPIO_MODE_OUTPUT,
+    GPIO_MODE_AF,
+    GPIO_MODE_ANALOG
+} gpio_mode_t;
+
+/**
+ * @brief GPIO Pull-up/Pull-down configurations.
+ */
+typedef enum {
+    GPIO_PULL_NONE = 0,
+    GPIO_PULL_UP,
+    GPIO_PULL_DOWN
+} gpio_pull_t;
+
+/**
+ * @brief Initialize a GPIO pin.
+ * 
+ * @param port The GPIO port (e.g., GPIO_PORT_A).
+ * @param pin The pin number (0-15).
+ * @param mode The mode (Input, Output, AF, Analog).
+ * @param pull The pull-up/down configuration.
+ * @param af The alternate function number (0-15), used only if mode is GPIO_MODE_AF.
+ */
+void gpio_init(gpio_port_t port, uint8_t pin, gpio_mode_t mode, gpio_pull_t pull, uint8_t af);
+
+/**
+ * @brief Write a value to a GPIO pin.
+ * 
+ * @param port The GPIO port.
+ * @param pin The pin number.
+ * @param value 0 for low, non-zero for high.
+ */
+void gpio_write(gpio_port_t port, uint8_t pin, uint8_t value);
+
+/**
+ * @brief Toggle the state of a GPIO pin.
+ * 
+ * @param port The GPIO port.
+ * @param pin The pin number.
+ */
+void gpio_toggle(gpio_port_t port, uint8_t pin);
+
+/**
+ * @brief Read the state of a GPIO pin.
+ * 
+ * @param port The GPIO port.
+ * @param pin The pin number.
+ * @return uint8_t 1 if high, 0 if low.
+ */
+uint8_t gpio_read(gpio_port_t port, uint8_t pin);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* GPIO_H */

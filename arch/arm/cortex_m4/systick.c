@@ -1,5 +1,8 @@
 #include "systick.h"
-#include "utils.h"
+#include "scheduler.h"
+#include "platform.h"
+#include "device_registers.h"
+#include "arch_ops.h"
 
 /***************** SYS_CSR ******************/
 /* set to 1 to enable SysTick */
@@ -41,7 +44,6 @@
 #define SYST_CALIB_NOREF_POS    31U
 #define SYST_CALIB_NOREF_MASK   (1UL << SYST_CALIB_NOREF_POS)
 
-extern void scheduler_wake_sleeping_tasks(void);
 
 /* Simple global tick counter incremented on each SysTick interrupt */
 volatile uint32_t systick_ticks = 0;
@@ -54,14 +56,14 @@ void SysTick_Handler(void)
     /* Wake any tasks that have finished sleeping */
     scheduler_wake_sleeping_tasks();
 
-    yield_cpu(); /* trigger context switch */
+    arch_yield(); /* trigger context switch */
 }
 
 
 /* initialize the SysTick driver with desired tick frequency (Hz) */
 int systick_init(uint32_t ticks_hz) {
     /* get system clock */
-    uint32_t sysclk_hz = get_system_clock_hz();
+    uint32_t sysclk_hz = platform_get_cpu_freq();
     if(sysclk_hz == 0 || ticks_hz == 0) {
         return -1; /* error */
     }
@@ -105,7 +107,6 @@ void systick_delay_ticks(uint32_t ticks)
 {
     uint32_t start = systick_ticks;
     while ((systick_ticks - start) < ticks) {
-        /* busy wait */
+        arch_nop();
     }
 }
-

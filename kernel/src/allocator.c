@@ -1,5 +1,5 @@
 #include "allocator.h"
-#include <string.h>
+#include "arch_ops.h"
 
 /* 8 bytes header */
 typedef struct Block {
@@ -73,7 +73,11 @@ void allocator_init(uint8_t* pool, size_t size) {
 }
 
 void* allocator_malloc(size_t size) {
-    if (size == 0 || size > mem_capacity) return NULL;
+    uint32_t flags = arch_irq_lock();
+    if (size == 0 || size > mem_capacity) {
+        arch_irq_unlock(flags);
+        return NULL;
+    }
     size_t aligned_size = ALIGN(size);
 
     Block* curr = head;
@@ -110,15 +114,19 @@ void* allocator_malloc(size_t size) {
             }
 
             curr->size_and_free = UPDATE_SIZE_AND_FREE(curr_size, NOT_FREE_MASK);
+            arch_irq_unlock(flags);
             return (void*)(curr + 1);
         }
         curr = curr->next;
     }
+    arch_irq_unlock(flags);
     return NULL;
 }
 
 void allocator_free(void* ptr) {
     if(!ptr) return;
+
+    uint32_t flags = arch_irq_lock();
 
     /* Free the requested block (its before the data) */
     Block* block_to_free = (Block*)ptr - 1;
@@ -149,6 +157,7 @@ void allocator_free(void* ptr) {
         }
         curr = curr->next;
     }
+    arch_irq_unlock(flags);
 }
 
 void* allocator_realloc(void* ptr, size_t new_size) {
@@ -158,6 +167,9 @@ void* allocator_realloc(void* ptr, size_t new_size) {
         allocator_free(ptr);
         return NULL;
     }
+
+    /* Lock to safely read block header and prevent race conditions */
+    uint32_t flags = arch_irq_lock();
 
     Block* block = (Block*)ptr - 1;
     size_t curr_size = GET_SIZE(block->size_and_free);
@@ -178,6 +190,7 @@ void* allocator_realloc(void* ptr, size_t new_size) {
             allocated_mem -= (remaining_size + sizeof(Block));
             free_blocks++;
         }
+        arch_irq_unlock(flags);
         return ptr;
     } 
 
@@ -187,9 +200,13 @@ void* allocator_realloc(void* ptr, size_t new_size) {
         // Only copy the data that fits in both
         memcpy(new_ptr, ptr, curr_size);
         allocator_free(ptr);
+        /* allocator_free takes its own lock, but we are holding one. 
+           arch_irq_lock supports nesting, so this is safe. */
     } else {
+        arch_irq_unlock(flags);
         return NULL;
     }
+    arch_irq_unlock(flags);
     return new_ptr;
 }
 
@@ -202,7 +219,9 @@ size_t allocator_get_fragment_count(void) {
 }
 
 int allocator_get_stats(heap_stats_t *stats) {
+    uint32_t flags = arch_irq_lock();
     if (stats == NULL) {
+        arch_irq_unlock(flags);
         return -1;
     }
     
@@ -214,6 +233,7 @@ int allocator_get_stats(heap_stats_t *stats) {
         stats->largest_free_block = 0;
         stats->allocated_blocks = 0;
         stats->free_blocks = 0;
+        arch_irq_unlock(flags);
         return -1;
     }
 
@@ -232,10 +252,12 @@ int allocator_get_stats(heap_stats_t *stats) {
         stats->largest_free_block = 0;
     }
 
+    arch_irq_unlock(flags);
     return 0;
 }
 
 int allocator_check_integrity(void) {
+    uint32_t flags = arch_irq_lock();
     if (!head) return -1; /* Not initialized */
 
     size_t calculated_free = 0;
@@ -249,6 +271,7 @@ int allocator_check_integrity(void) {
     while (curr) {
         /* The current block must be within heap limits. */
         if ((uintptr_t)curr < heap_start || (uintptr_t)curr >= heap_end) {
+            arch_irq_unlock(flags);
             return -1;
         }
 
@@ -257,6 +280,7 @@ int allocator_check_integrity(void) {
 
         /* A block cannot be larger than the entire heap. */
         if (size > mem_capacity) {
+            arch_irq_unlock(flags);
             return -1;
         }
 
@@ -271,14 +295,16 @@ int allocator_check_integrity(void) {
 
     /* The sum of free blocks found must match the global counter. */
     if (calculated_free != free_mem) {
+        arch_irq_unlock(flags);
         return -1;
     }
 
     /* The sum of allocated blocks found must match the global counter. */
     if (allocated_size != allocated_mem) {
+        arch_irq_unlock(flags);
         return -1;
     }
 
+    arch_irq_unlock(flags);
     return 0; /* Integrity OK */
 }
-

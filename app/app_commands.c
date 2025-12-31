@@ -1,9 +1,12 @@
 #include "app_commands.h"
 #include "cli.h"
 #include "scheduler.h"
-#include "stm32_alloc.h"
-#include "systick.h"
 #include "utils.h"
+#include "platform.h"
+#include "project_config.h"
+#include "allocator.h"
+#include "led.h"
+#include "button.h"
 
 /* Forward declarations */
 static int cmd_heap_stats_handler(int argc, char **argv);
@@ -11,9 +14,9 @@ static int cmd_task_list_handler(int argc, char **argv);
 static int cmd_uptime_handler(int argc, char **argv);
 static int cmd_kill_handler(int argc, char **argv);
 static int cmd_reboot_handler(int argc, char **argv);
+static int cmd_blink_handler(int argc, char **argv);
+static int cmd_logger_handler(int argc, char **argv);
 
-#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
-/******************* For heap test *******************/
 static int cmd_heap_test_handler(int argc, char **argv);
 /* Pseudo-random number generator for stress testing */
 static uint32_t prng_state = 1234;
@@ -45,8 +48,6 @@ static int verify_pattern(uint8_t *ptr, size_t size) {
         return -1; \
     } \
 } while(0)
-/****************************************************/
-#endif
 
 /* Command definitions */
 static const cli_command_t heap_stats_cmd = {
@@ -79,13 +80,23 @@ static const cli_command_t reboot_cmd = {
     .handler = cmd_reboot_handler
 };
 
-#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
+static const cli_command_t blink_cmd = {
+    .name = "blink",
+    .help = "Start the blink task",
+    .handler = cmd_blink_handler
+};
+
+static const cli_command_t logger_cmd = {
+    .name = "logger",
+    .help = "Start the button logger task",
+    .handler = cmd_logger_handler
+};
+
 static const cli_command_t heap_test_cmd = {
     .name = "heaptest",
     .help = "Stress test heap: heaptest <basic|frag|stress> [size]",
     .handler = cmd_heap_test_handler
 };
-#endif
 
 /* Command handlers */
 static int cmd_heap_stats_handler(int argc, char **argv)
@@ -93,9 +104,8 @@ static int cmd_heap_stats_handler(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
     heap_stats_t stats;
-    if (stm32_allocator_get_stats(&stats) == 0) {
+    if (allocator_get_stats(&stats) == 0) {
         cli_printf("Heap Statistics:\r\n");
         cli_printf("  Total size:     %u bytes\r\n", (unsigned int)stats.total_size);
         cli_printf("  Used:           %u bytes\r\n", (unsigned int)stats.used_size);
@@ -110,7 +120,7 @@ static int cmd_heap_stats_handler(int argc, char **argv)
         }
         
         /* Check integrity */
-        if (stm32_allocator_check_integrity() == 0) {
+        if (allocator_check_integrity() == 0) {
             cli_printf("  Status:          OK\r\n");
         } else {
             cli_printf("  Status:          CORRUPTED!\r\n");
@@ -118,10 +128,6 @@ static int cmd_heap_stats_handler(int argc, char **argv)
     } else {
         cli_printf("Heap not initialized\r\n");
     }
-#else
-    cli_printf("Heap statistics only available in dynamic allocation mode\r\n");
-    cli_printf("Current mode: STATIC (stacks embedded in task_list[])\r\n");
-#endif
 
     return 0;
 }
@@ -150,15 +156,11 @@ static int cmd_task_list_handler(int argc, char **argv)
                 default:            state_str = "UNKNOWN"; break;
             }
 
-#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_STATIC
-            cli_printf("%u   %s      STATIC\r\n", task_list[i].task_id, state_str);
-#else
             if (task_list[i].stack_ptr != NULL) {
-                cli_printf("%u   %s      %x\r\n", task_list[i].task_id, state_str, (unsigned int)task_list[i].stack_ptr);
+                cli_printf("%u   %s      %x\r\n", task_list[i].task_id, state_str, (uintptr_t)task_list[i].stack_ptr);
             } else {
                 cli_printf("Error loacting memory");
             }
-#endif
             count++;
         }
     }
@@ -173,7 +175,7 @@ static int cmd_uptime_handler(int argc, char **argv) {
     (void)argv;
 
     /* every tick is 1ms */
-    uint32_t ticks = systick_ticks;
+    uint32_t ticks = (uint32_t)platform_get_ticks();
     uint32_t seconds = ticks / 1000;
     uint32_t mili_sec = ticks % 1000;
 
@@ -220,20 +222,60 @@ static int cmd_kill_handler(int argc, char **argv) {
 static int cmd_reboot_handler(int argc, char **argv) {
     (void)argc; (void)argv;
     cli_printf("Rebooting system...\r\n");
-    
-    /* Standard Cortex-M reset: Write 0x5FA to AIRCR with SYSRESETREQ bit */
-    #define SCB_AIRCR_SYSRESETREQ_MASK (1 << 2)
-    #define SCB_AIRCR_VECTKEY_POS      16U
-    #define SCB_AIRCR_VECTKEY_VAL      0x05FA
-    
-    SCB->AIRCR = (SCB_AIRCR_VECTKEY_VAL << SCB_AIRCR_VECTKEY_POS) | 
-                 SCB_AIRCR_SYSRESETREQ_MASK;
-                 
+
+    platform_reset();
+
     while(1); /* Wait for hardware reset */
     return 0;
 }
 
-#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
+static void task_blink(void *arg)
+{
+    (void)arg;
+    led_init();
+
+    while (1) {
+        led_toggle();
+        /* Sleep cooperatively for 500 SysTick ticks (e.g., 500 ms if 1 kHz) */
+        task_sleep_ticks(500);
+    }
+}
+
+static void task_button_logger(void *arg)
+{
+    (void)arg;
+    button_init();
+
+    uint32_t prev_btn = 0;
+    while (1) {
+        uint32_t btn = button_read();
+
+        if (btn && !prev_btn) {
+            cli_printf("Button pressed\r\n");
+        } else if (!btn && prev_btn) {
+            cli_printf("Button released\r\n");
+        }
+
+        prev_btn = btn;
+        /* Poll button at 50 Hz without busy-waiting */
+        task_sleep_ticks(20);
+    }
+}
+
+static int cmd_blink_handler(int argc, char **argv) {
+    (void)argc; (void)argv;
+    task_create(task_blink, NULL, STACK_SIZE_1KB);
+    cli_printf("Blink task started.\r\n");
+    return 0;
+}
+
+static int cmd_logger_handler(int argc, char **argv) {
+    (void)argc; (void)argv;
+    task_create(task_button_logger, NULL, STACK_SIZE_1KB);
+    cli_printf("Button logger task started.\r\n");
+    return 0;
+}
+
 static int cmd_heap_test_handler(int argc, char **argv) {
     if (argc < 2) {
         cli_printf("Usage: heaptest <mode> [size]\r\n");
@@ -248,12 +290,10 @@ static int cmd_heap_test_handler(int argc, char **argv) {
 
     /* Capture baseline stats to account for system tasks */
     heap_stats_t base_stats;
-    stm32_allocator_get_stats(&base_stats);
+    allocator_get_stats(&base_stats);
     size_t baseline_blocks = base_stats.allocated_blocks;
 
-    /* ==========================================
-     * MODE: BASIC (Integrity & Realloc)
-     * ========================================== */
+    /* Basic test: Allocate, verify pattern, realloc, and free */
     if (strcmp(mode, "basic") == 0) {
         if (argc < 3) { cli_printf("Size required.\r\n"); return -1; }
         size_t size = (size_t)atoi(argv[2]);
@@ -263,7 +303,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
         }
         
         cli_printf("1. Allocating %u bytes...\r\n", size);
-        uint8_t *ptr = stm32_allocator_malloc(size);
+        uint8_t *ptr = allocator_malloc(size);
         TEST_ASSERT(ptr != NULL, "Malloc returned NULL");
         
         cli_printf("2. Writing pattern...\r\n");
@@ -272,32 +312,30 @@ static int cmd_heap_test_handler(int argc, char **argv) {
         cli_printf("3. Verifying pattern...\r\n");
         if (verify_pattern(ptr, size) != 0) {
             cli_printf("[FAIL] Data corruption detected!\r\n");
-            stm32_allocator_free(ptr);
+            allocator_free(ptr);
             return -1;
         }
 
         cli_printf("4. Reallocating to %u bytes (Growing)...\r\n", size * 2);
-        uint8_t *new_ptr = stm32_allocator_realloc(ptr, size * 2);
+        uint8_t *new_ptr = allocator_realloc(ptr, size * 2);
         TEST_ASSERT(new_ptr != NULL, "Realloc returned NULL");
         
         /* Check if old data is still valid */
         if (verify_pattern(new_ptr, size) != 0) {
              cli_printf("[FAIL] Realloc corrupted old data!\r\n");
-             stm32_allocator_free(new_ptr);
+             allocator_free(new_ptr);
              return -1;
         }
         
         cli_printf("5. Freeing memory...\r\n");
-        stm32_allocator_free(new_ptr);
+        allocator_free(new_ptr);
 
         /* Final Integrity Check */
-        TEST_ASSERT(stm32_allocator_check_integrity() == 0, "Heap corrupted after free");
+        TEST_ASSERT(allocator_check_integrity() == 0, "Heap corrupted after free");
         cli_printf("[PASS] Basic test passed.\r\n");
     }
 
-    /* ==========================================
-     * MODE: FRAG (Fragmentation & Coalescing)
-     * ========================================== */
+    /* Fragmentation test: Create holes and verify coalescing */
     else if (strcmp(mode, "frag") == 0) {
         #define FRAG_BLOCKS 5
         #define FRAG_SIZE 64
@@ -305,35 +343,35 @@ static int cmd_heap_test_handler(int argc, char **argv) {
 
         cli_printf("1. Allocating %d blocks of %d bytes...\r\n", FRAG_BLOCKS, FRAG_SIZE);
         for(int i=0; i<FRAG_BLOCKS; i++) {
-            ptrs[i] = stm32_allocator_malloc(FRAG_SIZE);
+            ptrs[i] = allocator_malloc(FRAG_SIZE);
             TEST_ASSERT(ptrs[i] != NULL, "Alloc failed");
             memset(ptrs[i], 0xAA, FRAG_SIZE); /* Poison memory */
         }
 
         cli_printf("2. Creating holes (Freeing index 1 and 3)...\r\n");
         /* Before: [0][1][2][3][4] */
-        stm32_allocator_free(ptrs[1]);
-        stm32_allocator_free(ptrs[3]);
+        allocator_free(ptrs[1]);
+        allocator_free(ptrs[3]);
         ptrs[1] = NULL;
         ptrs[3] = NULL;
         /* After:  [0]...[2]...[4] */
 
-        TEST_ASSERT(stm32_allocator_check_integrity() == 0, "Integrity check failed after holes");
+        TEST_ASSERT(allocator_check_integrity() == 0, "Integrity check failed after holes");
         
         /* Get stats to see if we have fragments */
         heap_stats_t stats;
-        stm32_allocator_get_stats(&stats);
+        allocator_get_stats(&stats);
         cli_printf("   Fragments: %u (Expect > 1)\r\n", (unsigned int)stats.free_blocks);
 
         cli_printf("3. Freeing remaining blocks to force coalescing...\r\n");
-        stm32_allocator_free(ptrs[0]);
-        stm32_allocator_free(ptrs[2]);
-        stm32_allocator_free(ptrs[4]);
+        allocator_free(ptrs[0]);
+        allocator_free(ptrs[2]);
+        allocator_free(ptrs[4]);
 
-        TEST_ASSERT(stm32_allocator_check_integrity() == 0, "Integrity check failed after full free");
+        TEST_ASSERT(allocator_check_integrity() == 0, "Integrity check failed after full free");
         
         /* Verify everything merged back */
-        stm32_allocator_get_stats(&stats);
+        allocator_get_stats(&stats);
         
         /* We expect allocated_blocks to return to baseline, and free_blocks to be 1 */
         if (stats.allocated_blocks == baseline_blocks && stats.free_blocks == 1) {
@@ -344,9 +382,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
         }
     }
 
-    /* ==========================================
-     * MODE: STRESS (Randomized Torture)
-     * ========================================== */
+    /* Stress test: Random allocations and frees */
     else if (strcmp(mode, "stress") == 0) {
         #define STRESS_MAX_PTRS 32
         void *ptrs[STRESS_MAX_PTRS] = {0};
@@ -371,7 +407,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
                 
                 if (slot != -1) {
                     size_t sz = (mini_rand() % 128) + 8; /* Random size 8-136 bytes */
-                    ptrs[slot] = stm32_allocator_malloc(sz);
+                    ptrs[slot] = allocator_malloc(sz);
                     if (ptrs[slot]) {
                         memset(ptrs[slot], 0x55, sz); /* Touch memory */
                         alloc_count++;
@@ -393,7 +429,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
                 }
 
                 if (slot != -1) {
-                    stm32_allocator_free(ptrs[slot]);
+                    allocator_free(ptrs[slot]);
                     ptrs[slot] = NULL;
                     alloc_count--;
                 }
@@ -401,7 +437,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
             
             /* Periodic Integrity Check (every 10 ops) */
             if (i % 10 == 0) {
-                if (stm32_allocator_check_integrity() != 0) {
+                if (allocator_check_integrity() != 0) {
                     cli_printf("[FAIL] Heap corrupted at iteration %d\r\n", i);
                     return -1;
                 }
@@ -412,10 +448,10 @@ static int cmd_heap_test_handler(int argc, char **argv) {
         /* Cleanup: Free everything left */
         cli_printf("\r\nCleaning up...\r\n");
         for (int i = 0; i < STRESS_MAX_PTRS; i++) {
-            if (ptrs[i]) stm32_allocator_free(ptrs[i]);
+            if (ptrs[i]) allocator_free(ptrs[i]);
         }
         
-        TEST_ASSERT(stm32_allocator_check_integrity() == 0, "Final integrity check failed");
+        TEST_ASSERT(allocator_check_integrity() == 0, "Final integrity check failed");
         cli_printf("[PASS] Stress test survived.\r\n");
     }
     
@@ -426,7 +462,6 @@ static int cmd_heap_test_handler(int argc, char **argv) {
 
     return 0;
 }
-#endif
 
 /* Register all commands */
 void app_commands_register_all(void)
@@ -436,9 +471,8 @@ void app_commands_register_all(void)
     cli_register_command(&uptime_cmd);
     cli_register_command(&kill_cmd);
     cli_register_command(&reboot_cmd);
+    cli_register_command(&blink_cmd);
+    cli_register_command(&logger_cmd);
 
-#if TASK_STACK_ALLOC_MODE == TASK_ALLOC_DYNAMIC
     cli_register_command(&heap_test_cmd);
-#endif
 }
-

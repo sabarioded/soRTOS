@@ -26,6 +26,8 @@ extern "C" {
 #define GPIOB_BASE              (AHB2PERIPH_BASE + 0x0400UL)
 #define GPIOC_BASE              (AHB2PERIPH_BASE + 0x0800UL)
 #define GPIOD_BASE              (AHB2PERIPH_BASE + 0x0C00UL)
+#define GPIOE_BASE              (AHB2PERIPH_BASE + 0x1000UL)
+#define GPIOH_BASE              (AHB2PERIPH_BASE + 0x1C00UL)
 
 /************* UART/USART base addresses *****************/
 #define USART2_BASE             (APB1PERIPH_BASE + 0x4400UL)
@@ -124,7 +126,7 @@ typedef struct {
     volatile uint32_t ICR;      // 0x20 Interrupt flag clear register
     volatile uint32_t RDR;      // 0x24 Receive data register
     volatile uint32_t TDR;      // 0x28 Transmit data register
-} USART_t;
+} USART_TypeDef;
 
 /************* SysTick Registers *****************/
 typedef struct {
@@ -206,13 +208,15 @@ typedef struct {
 #define GPIOB     ((GPIO_t  *) GPIOB_BASE)
 #define GPIOC     ((GPIO_t  *) GPIOC_BASE)
 #define GPIOD     ((GPIO_t  *) GPIOD_BASE)
+#define GPIOE     ((GPIO_t  *) GPIOE_BASE)
+#define GPIOH     ((GPIO_t  *) GPIOH_BASE)
 
-#define USART1    ((USART_t *) USART1_BASE)
-#define USART2    ((USART_t *) USART2_BASE)
-#define USART3    ((USART_t *) USART3_BASE)
-#define UART4     ((USART_t *) UART4_BASE)
-#define UART5     ((USART_t *) UART5_BASE)
-#define LPUART1   ((USART_t *) LPUART1_BASE)
+#define USART1    ((USART_TypeDef *) USART1_BASE)
+#define USART2    ((USART_TypeDef *) USART2_BASE)
+#define USART3    ((USART_TypeDef *) USART3_BASE)
+#define UART4     ((USART_TypeDef *) UART4_BASE)
+#define UART5     ((USART_TypeDef *) UART5_BASE)
+#define LPUART1   ((USART_TypeDef *) LPUART1_BASE)
 
 #define SYSTICK   ((SysTick_t *) SYSTICK_BASE)
 

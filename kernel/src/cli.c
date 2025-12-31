@@ -1,6 +1,6 @@
 #include "cli.h"
 #include "scheduler.h" /* For task_sleep_ticks */
-#include <string.h>    /* For strcmp, strlen, memset */
+#include "utils.h"     /* For strcmp, memset */
 #include <stdarg.h>    /* For cli_printf variable args */
 #include <project_config.h>
 
@@ -117,7 +117,7 @@ uint32_t cli_printf(const char *text, ...) {
                 /* determine the sign */
                 if(arg < 0) {
                     buff[pos++] = '-';
-                    uval = (unsigned int)(-arg);  // Safe conversion
+                    uval = (unsigned int)0 - (unsigned int)arg; /* Safe negation for INT_MIN */
                 } else {
                     uval = (unsigned int)arg;
                 }
@@ -159,7 +159,7 @@ uint32_t cli_printf(const char *text, ...) {
                 int i = 0;
                 do {
                     unsigned int digit = (arg % 16);
-                    digit_buff[i++] =  digit < 10 ? '0' + digit : 'a' + digit;
+                    digit_buff[i++] =  digit < 10 ? '0' + digit : 'a' + (digit - 10);
                     arg = arg / 16;
                 } while (arg > 0 && i < 10);
 

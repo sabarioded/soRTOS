@@ -1,6 +1,6 @@
-# STM32 Custom CLI & RTOS
+# soRTOS
 
-A lightweight, preemptive Real-Time Operating System (RTOS) built from scratch for the STM32L476RG (Cortex-M4). This project demonstrates the implementation of a kernel, a thread-safe memory allocator, and an interactive Command Line Interface (CLI) without relying on the standard STM32 HAL or external RTOS libraries.
+Welcome to **soRTOS**! This is a lightweight, preemptive Real-Time Operating System (RTOS) that I wrote from scratch in C. It started as a project for the STM32L476RG (Cortex-M4), but I've designed it to be modular so the kernel logic is separate from the hardware details. This makes it pretty easy to port to other chips if you want to.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-STM32L476-green.svg)
@@ -9,24 +9,38 @@ A lightweight, preemptive Real-Time Operating System (RTOS) built from scratch f
 ## Key Features
 
 ### 1. Preemptive Kernel
-* **Round-Robin Scheduling:** Implements true context switching using `PendSV` and assembly (PSP/MSP separation).
-* **Task Management:** Supports dynamic task creation, deletion, and sleeping (`task_sleep_ticks`).
-* **Context Safety:** Full register context saving (R4-R11) and FPU safety.
-* **Idle Task:** Automatic garbage collection and power saving (`WFI`) when no tasks are ready.
+I implemented a proper Round-Robin scheduler that handles context switching (using `PendSV` on Cortex-M). You can create and delete tasks dynamically, and put them to sleep with `task_sleep_ticks`. It saves the full register context (including FPU) so your tasks are safe. There's also an Idle task that cleans up memory (garbage collection) and puts the CPU to sleep (`WFI`) to save power when nothing else is running.
 
 ### 2. Custom Memory Management
-* **Heap Allocator:** A `malloc`/`free` implementation using a "Best-Fit" strategy with block coalescing to reduce fragmentation.
-* **Thread Safety:** A wrapper (`stm32_alloc.c`) protects the heap using `BASEPRI` masking, preventing corruption from interrupts.
-* **Diagnostics:** Built-in commands to visualize heap map and fragmentation.
+I wrote a custom heap allocator (`malloc`/`free`) using a "Best-Fit" strategy that merges free blocks to keep fragmentation low. It's thread-safe (using critical sections) so interrupts won't corrupt your memory. I also added some CLI commands so you can see exactly what's happening with the heap.
 
 ### 3. Interactive CLI
-* **UART Driver:** Interrupt-driven (non-blocking) UART with Ring Buffers for RX/TX.
-* **Command Parser:** Token-based argument parsing (argc/argv style).
-* **Extensible:** Easy API to register custom commands via `cli_register_command`.
+The system comes with a built-in shell. It uses an interrupt-driven UART driver with ring buffers, so it doesn't block the CPU. The command parser handles arguments, and adding your own commands is super simple—just use `cli_register_command`.
 
-### 4. Bare-Metal Drivers
-* **Zero-HAL:** Custom register definitions (`device_registers.h`) instead of vendor HAL bloat.
-* **System Clock:** Dynamic configuration of PLL, MSI, and HSI16 oscillators.
-* **Peripherals:** Drivers for GPIO, SysTick, and USART2.
+### 4. Portable Architecture
+I tried to keep the kernel clean by hiding hardware details behind a Platform Abstraction Layer (PAL). The drivers are "Zero-HAL"—I wrote custom register definitions for the STM32L476RG to avoid the bloat of vendor libraries.
 
----
+## Building and Running
+
+The project uses a portable `Makefile` to handle everything.
+
+### Prerequisites
+* `arm-none-eabi-gcc` (for STM32)
+* `gcc` (for host tests)
+* `openocd` (for flashing)
+* `make`
+
+### Build for STM32L476RG (Default)
+```bash
+make
+```
+
+### Flash to Board
+```bash
+make load
+```
+
+### Run Unit Tests (Host)
+```bash
+make test
+```
