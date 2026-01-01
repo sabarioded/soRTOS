@@ -6,12 +6,15 @@
 #define BLOCK_SIZE 8
 static uint8_t test_pool[POOL_SIZE];
 
-void setUp(void) {
+extern void (*test_setUp_hook)(void);
+extern void (*test_tearDown_hook)(void);
+
+static void setUp_local(void) {
     // Reset the allocator before every test
     allocator_init(test_pool, POOL_SIZE);
 }
 
-void tearDown(void) { }
+static void tearDown_local(void) { }
 
 void test_should_return_pointer_when_requesting_memory(void) {
     void* ptr = allocator_malloc(128);
@@ -236,6 +239,8 @@ void test_fragment_count_accuracy(void) {
 }
 
 void run_allocator_tests(void) {
+    test_setUp_hook = setUp_local;
+    test_tearDown_hook = tearDown_local;
     UnitySetTestFile("tests/test_allocator.c");
     RUN_TEST(test_should_return_pointer_when_requesting_memory);
     RUN_TEST(test_should_return_null_when_pool_is_exhausted);

@@ -6,6 +6,8 @@
 #include "device_registers.h"
 #include "arch_ops.h"
 #include "gpio.h"
+#include "scheduler.h"
+#include "queue.h"
 
 /*
  * RCC_APB1ENR1 – APB1 peripheral clock enable register 1
@@ -136,6 +138,8 @@ static volatile uint8_t  uart_tx_buf[UART_MAX_INSTANCES][UART_RX_BUFFER_SIZE];
 static volatile uint32_t uart_tx_head[UART_MAX_INSTANCES];
 static volatile uint32_t uart_tx_tail[UART_MAX_INSTANCES];
 static volatile uint32_t uart_tx_overflow[UART_MAX_INSTANCES];
+static volatile uint16_t uart_rx_notify_tasks[UART_MAX_INSTANCES];
+static queue_t * volatile uart_rx_queues[UART_MAX_INSTANCES];
 
 
 /* Find array index for a given instance */
@@ -169,6 +173,8 @@ static int uart_register_instance(USART_TypeDef *UARTx)
             uart_tx_head[i] = 0;
             uart_tx_tail[i] = 0;
             uart_tx_overflow[i] = 0;
+            uart_rx_notify_tasks[i] = 0;
+            uart_rx_queues[i] = NULL;
             return i;
         }
     }
@@ -443,17 +449,29 @@ void uart_irq_handler(uart_port_t port)
         /* read the recieve data register */
         uint8_t b = (uint8_t)(UARTx->RDR & 0xFFU);
 
-        /* Put into circular buffer */
-        uint32_t head = uart_rx_head[idx];
-        uint32_t next = (head + 1U) % UART_RX_BUFFER_SIZE;
-
-        if (next != uart_rx_tail[idx]) {
-            uart_rx_buf[idx][head] = b;
-            arch_dmb(); /* Ensure the data byte is written to memory before we publish the head pointer. */
-            uart_rx_head[idx] = next;
-            arch_dmb();
+        /* If a queue is registered, push to it directly */
+        if (uart_rx_queues[idx] != NULL) {
+            if (queue_send_from_isr(uart_rx_queues[idx], &b) < 0) {
+                uart_rx_overflow[idx]++;
+            }
         } else {
-            uart_rx_overflow[idx]++;   // record overflow
+            /* Put into circular buffer */
+            uint32_t head = uart_rx_head[idx];
+            uint32_t next = (head + 1U) % UART_RX_BUFFER_SIZE;
+
+            if (next != uart_rx_tail[idx]) {
+                uart_rx_buf[idx][head] = b;
+                arch_dmb(); /* Ensure the data byte is written to memory before we publish the head pointer. */
+                uart_rx_head[idx] = next;
+                arch_dmb();
+
+                /* Notify registered task if any */
+                if (uart_rx_notify_tasks[idx] != 0) {
+                    task_notify(uart_rx_notify_tasks[idx], 1);
+                }
+            } else {
+                uart_rx_overflow[idx]++;   // record overflow
+            }
         }
     }
 
@@ -542,6 +560,22 @@ void uart_enable_tx_interrupt(uart_port_t port, uint8_t enable)
     }
     
     arch_dsb();
+}
+
+void uart_set_rx_notify_task(uart_port_t port, uint16_t task_id) {
+    USART_TypeDef *UARTx = (USART_TypeDef *)port;
+    int idx = uart_get_index(UARTx);
+    if (idx >= 0) {
+        uart_rx_notify_tasks[idx] = task_id;
+    }
+}
+
+void uart_set_rx_queue(uart_port_t port, queue_t *q) {
+    USART_TypeDef *UARTx = (USART_TypeDef *)port;
+    int idx = uart_get_index(UARTx);
+    if (idx >= 0) {
+        uart_rx_queues[idx] = q;
+    }
 }
 
 

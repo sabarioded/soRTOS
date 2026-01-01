@@ -30,6 +30,7 @@ static size_t allocated_mem = 0;
 static size_t free_blocks = 0;
 static size_t allocated_blocks = 0;
 
+/* Helper to find the largest contiguous free block for statistics */
 static Block* allocator_get_largest_free_block(void) {
     Block* curr = head;
     Block* largest_block = NULL;
@@ -49,6 +50,7 @@ static Block* allocator_get_largest_free_block(void) {
     return largest_block;
 }
 
+/* Initialize the memory pool and align the start address */
 void allocator_init(uint8_t* pool, size_t size) {
     /* Ensure the start of the pool is aligned */
     uintptr_t raw_addr = (uintptr_t)pool;
@@ -72,6 +74,7 @@ void allocator_init(uint8_t* pool, size_t size) {
     allocated_blocks = 0;
 }
 
+/* Allocate a block of memory. Thread-safe. */
 void* allocator_malloc(size_t size) {
     uint32_t flags = arch_irq_lock();
     if (size == 0 || size > mem_capacity) {
@@ -123,6 +126,7 @@ void* allocator_malloc(size_t size) {
     return NULL;
 }
 
+/* Free a memory block and coalesce adjacent free blocks */
 void allocator_free(void* ptr) {
     if(!ptr) return;
 
@@ -160,6 +164,7 @@ void allocator_free(void* ptr) {
     arch_irq_unlock(flags);
 }
 
+/* Resize a memory block. Moves data if necessary. */
 void* allocator_realloc(void* ptr, size_t new_size) {
     if (!ptr) return allocator_malloc(new_size);
     
@@ -210,14 +215,17 @@ void* allocator_realloc(void* ptr, size_t new_size) {
     return new_ptr;
 }
 
+/* Get total free memory size */
 size_t allocator_get_free_size(void) {
     return free_mem;
 }
 
+/* Get number of free fragments */
 size_t allocator_get_fragment_count(void) {
     return free_blocks;
 }
 
+/* Populate heap statistics */
 int allocator_get_stats(heap_stats_t *stats) {
     uint32_t flags = arch_irq_lock();
     if (stats == NULL) {
@@ -256,6 +264,7 @@ int allocator_get_stats(heap_stats_t *stats) {
     return 0;
 }
 
+/* Verify heap integrity (bounds and consistency) */
 int allocator_check_integrity(void) {
     uint32_t flags = arch_irq_lock();
     if (!head) return -1; /* Not initialized */

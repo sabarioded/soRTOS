@@ -111,3 +111,6 @@ void *platform_initialize_stack(void *top_of_stack, void (*task_func)(void *), v
     (void)task_func; (void)arg; (void)exit_handler;
     return top_of_stack;
 }
+
+void platform_uart_set_rx_notify(uint16_t task_id) { (void)task_id; }
+void platform_uart_set_rx_queue(queue_t *q) { (void)q; }

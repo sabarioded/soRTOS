@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "queue.h"
 
 /* Opaque handle for the UART port (e.g. USART1, USART2) */
 typedef void* uart_port_t;
@@ -104,5 +105,19 @@ void uart_enable_tx_interrupt(uart_port_t port, uint8_t enable);
  * @param port Handle to the UART port.
  */
 void uart_irq_handler(uart_port_t port);
+
+/**
+ * @brief Register a task to be notified when a byte is received.
+ * @param port Handle to the UART port.
+ * @param task_id The ID of the task to notify (0 to disable).
+ */
+void uart_set_rx_notify_task(uart_port_t port, uint16_t task_id);
+
+/**
+ * @brief Register a queue to receive incoming bytes.
+ * @param port Handle to the UART port.
+ * @param q Pointer to the queue (NULL to disable).
+ */
+void uart_set_rx_queue(uart_port_t port, queue_t *q);
 
 #endif /* UART_H */

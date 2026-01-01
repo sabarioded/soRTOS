@@ -9,6 +9,12 @@
 extern "C" {
 #endif
 
+/* Weights for Stride Scheduling (Higher weight = More CPU time) */
+#define TASK_WEIGHT_IDLE        1
+#define TASK_WEIGHT_LOW         10
+#define TASK_WEIGHT_NORMAL      20
+#define TASK_WEIGHT_HIGH        50
+
 typedef enum task_state {
     TASK_UNUSED = 0,
     TASK_READY,
@@ -54,9 +60,10 @@ void scheduler_wake_sleeping_tasks(void);
  * @param task_func Entry function for the task.
  * @param arg Argument to pass to the task function.
  * @param stack_size_bytes Stack size in bytes.
+ * @param weight Task weight (higher number = more CPU time).
  * @return Task ID on success, -1 on failure.
  */
-int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_bytes);
+int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_bytes, uint8_t weight);
 
 /**
  * @brief Delete a task.
@@ -109,6 +116,25 @@ void task_block_current(void);
 int task_sleep_ticks(uint32_t ticks);
 
 /**
+ * @brief Wait for a notification.
+ * Blocks the current task until it receives a notification.
+ * 
+ * @param clear_on_exit If 1, the notification value is reset to 0 after reading.
+ * @param wait_ticks Max ticks to wait (0 for no wait, UINT32_MAX for infinite).
+ * @return The notification value, or 0 if timed out.
+ */
+uint32_t task_notify_wait(uint8_t clear_on_exit, uint32_t wait_ticks);
+
+/**
+ * @brief Send a notification to a specific task.
+ * Wakes the task if it was blocked waiting for a notification.
+ * 
+ * @param task_id The ID of the task to notify.
+ * @param value The value to OR into the task's notification value.
+ */
+void task_notify(uint16_t task_id, uint32_t value);
+
+/**
  * @brief Get the handle of the currently running task.
  * @return void* Opaque pointer to the current task (can be cast to task_t* internally).
  */
@@ -136,6 +162,13 @@ task_state_t task_get_state_atomic(task_t *t);
  * @return The task ID.
  */
 uint16_t task_get_id(task_t *t);
+
+/**
+ * @brief Get the weight of a task.
+ * @param t Pointer to the task.
+ * @return The task weight.
+ */
+uint8_t task_get_weight(task_t *t);
 
 /**
  * @brief Get the allocated stack size of a task.

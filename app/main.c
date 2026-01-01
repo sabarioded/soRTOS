@@ -8,6 +8,10 @@
 #include "memory_map.h"
 #include "scheduler.h"
 #include "arch_ops.h"
+#include "queue.h"
+
+/* Prototype for the new CLI function (should be in cli.h) */
+void cli_set_rx_queue(queue_t *q);
 
 /* ---------- main ---------- */
 
@@ -26,8 +30,15 @@ int main(void)
     /* Register application commands */
     app_commands_register_all();
     
+    /* Create a queue for CLI input (size 1 byte, depth 16 chars) */
+    queue_t *cli_rx_queue = queue_create(sizeof(char), 16);
+    
+    /* Register queue with UART driver and CLI */
+    platform_uart_set_rx_queue(cli_rx_queue);
+    cli_set_rx_queue(cli_rx_queue);
+    
     /* Create CLI task */
-    task_create(cli_task_entry, NULL, STACK_SIZE_2KB);
+    task_create(cli_task_entry, NULL, STACK_SIZE_2KB, TASK_WEIGHT_NORMAL);
     
     /* Start the scheduler - does not return */
     scheduler_start();

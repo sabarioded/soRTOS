@@ -1,6 +1,7 @@
 #include "mutex.h"
 #include "scheduler.h"
 #include "arch_ops.h"
+#include "platform.h"
 #include <stddef.h>
 
 /* Initialize a mutex */

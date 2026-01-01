@@ -22,6 +22,8 @@ C_SRCS += \
 	$(KERNEL_DIR)/src/allocator.c \
 	$(KERNEL_DIR)/src/mutex.c \
 	$(KERNEL_DIR)/src/semaphore.c \
+	$(KERNEL_DIR)/src/queue.c \
+	$(KERNEL_DIR)/src/timer.c \
 	$(KERNEL_DIR)/src/system_clock.c
 
 # --- Common Includes ---
@@ -125,6 +127,9 @@ TEST_SRCS     = tests/test_allocator.c $(KERNEL_DIR)/src/allocator.c $(KERNEL_DI
                 tests/test_mutex.c $(KERNEL_DIR)/src/mutex.c \
                 tests/test_scheduler.c $(KERNEL_DIR)/src/scheduler.c \
                 tests/test_semaphore.c $(KERNEL_DIR)/src/semaphore.c \
+                tests/test_queue.c $(KERNEL_DIR)/src/queue.c \
+                tests/test_timer.c $(KERNEL_DIR)/src/timer.c \
+                tests/test_common.c \
                 tests/test_main.c $(UNITY_SRC)
 TEST_BIN      = $(BUILD_DIR)/test_runner
 

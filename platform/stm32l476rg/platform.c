@@ -139,3 +139,11 @@ int platform_uart_puts(const char *s) {
     
     return uart_write_buffer(USART2, s, len);
 }
+
+void platform_uart_set_rx_notify(uint16_t task_id) {
+    uart_set_rx_notify_task(USART2, task_id);
+}
+
+void platform_uart_set_rx_queue(queue_t *q) {
+    uart_set_rx_queue(USART2, q);
+}

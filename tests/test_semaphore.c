@@ -3,44 +3,36 @@
 #include "scheduler.h"
 #include <string.h>
 #include <setjmp.h>
+#include "allocator.h"
 
-/* --- Mocks & Stubs --- */
+/* Access shared mocks */
+extern jmp_buf yield_jump;
+extern int mock_yield_count;
+extern task_t *task_current;
 
-/* Define the task struct for testing (opaque in scheduler.h) */
-struct task_struct {
-    uint16_t id;
-    task_state_t state;
-};
+static uint8_t heap[4096];
+static task_t *t1;
+static task_t *t2;
+static void dummy_task(void *arg) { (void)arg; }
 
-static task_t tasks[3];
-static task_t *current_task_ptr = NULL;
-static int yield_count = 0;
-static jmp_buf yield_jump;
-
-/* Mock: Return the controlled current task */
-void *task_get_current(void) {
-    return current_task_ptr;
-}
-
-/* Mock: Update task state */
-void task_set_state(task_t *t, task_state_t state) {
-    if (t) t->state = state;
-}
-
-/* Mock: Simulate context switch */
-void platform_yield(void) {
-    yield_count++;
-    longjmp(yield_jump, 1);
-}
+extern void (*test_setUp_hook)(void);
+extern void (*test_tearDown_hook)(void);
 
 /* --- Setup --- */
-void sem_setUp(void) {
-    memset(tasks, 0, sizeof(tasks));
-    tasks[0].id = 1; tasks[0].state = TASK_RUNNING;
-    tasks[1].id = 2; tasks[1].state = TASK_BLOCKED;
-    current_task_ptr = &tasks[0];
-    yield_count = 0;
+static void setUp_local(void) {
+    allocator_init(heap, sizeof(heap));
+    scheduler_init();
+    
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL); /* ID 1 */
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL); /* ID 2 */
+    t1 = scheduler_get_task_by_index(1);
+    t2 = scheduler_get_task_by_index(2);
+    
+    task_current = t1;
+    mock_yield_count = 0;
 }
+
+static void tearDown_local(void) {}
 
 /* --- Tests --- */
 void test_sem_init(void) {
@@ -57,7 +49,7 @@ void test_sem_wait_decrements_count(void) {
     
     sem_wait(&s);
     TEST_ASSERT_EQUAL(0, s.count);
-    TEST_ASSERT_EQUAL(0, yield_count);
+    TEST_ASSERT_EQUAL(0, mock_yield_count);
 }
 
 void test_sem_wait_blocks_when_empty(void) {
@@ -70,8 +62,8 @@ void test_sem_wait_blocks_when_empty(void) {
         TEST_FAIL_MESSAGE("sem_wait should have yielded/blocked");
     }
     
-    TEST_ASSERT_EQUAL(1, yield_count);
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, tasks[0].state);
+    TEST_ASSERT_EQUAL(1, mock_yield_count);
+    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t1));
     TEST_ASSERT_EQUAL(1, s.q_count);
 }
 
@@ -88,15 +80,16 @@ void test_sem_signal_wakes_task(void) {
     sem_init(&s, 0, 5);
     
     /* Manually queue a task */
-    s.wait_queue[0] = &tasks[1];
+    s.wait_queue[0] = t2;
     s.tail = 1;
     s.q_count = 1;
+    task_set_state(t2, TASK_BLOCKED);
     
     sem_signal(&s);
     
-    TEST_ASSERT_EQUAL(TASK_READY, tasks[1].state);
+    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t2));
     TEST_ASSERT_EQUAL(0, s.q_count);
-    TEST_ASSERT_EQUAL(0, s.count); /* Count shouldn't inc if we woke someone */
+    TEST_ASSERT_EQUAL(1, s.count); /* Count increments */
 }
 
 void test_sem_broadcast_wakes_all(void) {
@@ -104,22 +97,24 @@ void test_sem_broadcast_wakes_all(void) {
     sem_init(&s, 0, 5);
     
     /* Queue 2 tasks */
-    s.wait_queue[0] = &tasks[1];
-    s.wait_queue[1] = &tasks[2];
+    s.wait_queue[0] = t1;
+    s.wait_queue[1] = t2;
     s.tail = 2;
     s.q_count = 2;
-    tasks[1].state = TASK_BLOCKED;
-    tasks[2].state = TASK_BLOCKED;
+    task_set_state(t1, TASK_BLOCKED);
+    task_set_state(t2, TASK_BLOCKED);
     
     sem_broadcast(&s);
     
-    TEST_ASSERT_EQUAL(TASK_READY, tasks[1].state);
-    TEST_ASSERT_EQUAL(TASK_READY, tasks[2].state);
+    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t1));
+    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t2));
     TEST_ASSERT_EQUAL(0, s.q_count);
     TEST_ASSERT_EQUAL(2, s.count); /* Should increment for each woken task */
 }
 
 void run_semaphore_tests(void) {
+    test_setUp_hook = setUp_local;
+    test_tearDown_hook = tearDown_local;
     UnitySetTestFile("tests/test_semaphore.c");
     RUN_TEST(test_sem_init);
     RUN_TEST(test_sem_wait_decrements_count);

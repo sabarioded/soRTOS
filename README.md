@@ -1,36 +1,53 @@
 # soRTOS
 
-Welcome to **soRTOS**! This is a lightweight, preemptive Real-Time Operating System (RTOS) that I wrote from scratch in C. It started as a project for the STM32L476RG (Cortex-M4), but I've designed it to be modular so the kernel logic is separate from the hardware details. This makes it pretty easy to port to other chips if you want to.
+**A lightweight, preemptive Real-Time Operating System written from scratch.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-STM32L476-green.svg)
 ![Architecture](https://img.shields.io/badge/arch-ARM%20Cortex--M4-orange.svg)
 
-## Key Features
+## What is this?
 
-### 1. Preemptive Kernel
-I implemented a proper Round-Robin scheduler that handles context switching (using `PendSV` on Cortex-M). You can create and delete tasks dynamically, and put them to sleep with `task_sleep_ticks`. It saves the full register context (including FPU) so your tasks are safe. There's also an Idle task that cleans up memory (garbage collection) and puts the CPU to sleep (`WFI`) to save power when nothing else is running.
+Hi! Welcome to **soRTOS**. This is a hobby project where I built a fully functional RTOS kernel in C. It started as a way to deeply understand how operating systems work on bare metal—specifically for the STM32L476RG (Cortex-M4)—but it has grown into a modular system that separates the kernel logic from the hardware.
 
-### 2. Custom Memory Management
-I wrote a custom heap allocator (`malloc`/`free`) using a "Best-Fit" strategy that merges free blocks to keep fragmentation low. It's thread-safe (using critical sections) so interrupts won't corrupt your memory. I also added some CLI commands so you can see exactly what's happening with the heap.
+If you're interested in embedded systems, context switching, or just want to see how `malloc` works under the hood, you've come to the right place.
 
-### 3. Interactive CLI
-The system comes with a built-in shell. It uses an interrupt-driven UART driver with ring buffers, so it doesn't block the CPU. The command parser handles arguments, and adding your own commands is super simple—just use `cli_register_command`.
+## What's Inside?
 
-### 4. Portable Architecture
-I tried to keep the kernel clean by hiding hardware details behind a Platform Abstraction Layer (PAL). The drivers are "Zero-HAL"—I wrote custom register definitions for the STM32L476RG to avoid the bloat of vendor libraries.
+I've implemented the core primitives you'd expect in a modern RTOS, keeping the code clean and readable.
+
+### The Kernel
+*   **Preemptive Scheduler**: A Round-Robin scheduler that uses `PendSV` for context switching. It saves the full CPU context (including FPU registers), so your tasks don't step on each other's toes.
+*   **Task Management**: Create and delete tasks dynamically. There's even a garbage collector running in the Idle task to clean up stack memory from deleted tasks.
+*   **Software Timers**: Need to blink an LED or timeout an operation? You can schedule one-shot or periodic callbacks without burning a whole task for it.
+
+### Synchronization & IPC
+*   **Mutexes**: With "Direct Handoff" optimization to prevent priority inversion and race conditions upon wake-up.
+*   **Semaphores**: Counting semaphores for resource tracking, complete with `broadcast` capabilities.
+*   **Message Queues**: Thread-safe, blocking queues for passing data between tasks (or from ISRs to tasks).
+*   **Task Notifications**: Lightweight signals to wake up specific tasks directly.
+
+### Memory Management
+*   **Custom Allocator**: I wrote a "Best-Fit" heap allocator with coalescing. It handles `malloc`, `free`, and `realloc` safely (thread-safe!).
+*   **Diagnostics**: You can inspect heap fragmentation and usage in real-time via the CLI.
+
+### The Shell (CLI)
+*   **Interactive**: Connect via UART and type commands.
+*   **Non-Blocking**: The UART driver uses interrupt-driven ring buffers, so the CPU stays free while you type.
+*   **Extensible**: Adding a custom command is as easy as calling `cli_register_command`.
 
 ## Building and Running
 
-The project uses a portable `Makefile` to handle everything.
+I use a standard `Makefile` to keep things portable. You can run this on an STM32 board or run the unit tests right on your PC.
 
 ### Prerequisites
-* `arm-none-eabi-gcc` (for STM32)
-* `gcc` (for host tests)
-* `openocd` (for flashing)
-* `make`
+*   `arm-none-eabi-gcc` (for STM32 builds)
+*   `gcc` (for running tests on your host)
+*   `openocd` (for flashing the board)
+*   `make`
 
-### Build for STM32L476RG (Default)
+### 1. Build for STM32
+Compiles the kernel, drivers, and app for the STM32L476RG.
 ```bash
 make
 ```

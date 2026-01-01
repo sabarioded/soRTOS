@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "queue.h"
 
 /**
  * @brief Stack alignment requirement in bytes.
@@ -95,5 +96,17 @@ int platform_uart_puts(const char *s);
  * * This function triggers a software reset of the microcontroller.
  */
 void platform_reset(void);
+
+/**
+ * @brief Register a task to be notified when UART data arrives.
+ * @param task_id The ID of the task to notify.
+ */
+void platform_uart_set_rx_notify(uint16_t task_id);
+
+/**
+ * @brief Register a queue to receive incoming UART bytes.
+ * @param q Pointer to the queue.
+ */
+void platform_uart_set_rx_queue(queue_t *q);
 
 #endif // PLATFORM_H

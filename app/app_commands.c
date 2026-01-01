@@ -7,6 +7,7 @@
 #include "allocator.h"
 #include "led.h"
 #include "button.h"
+#include "queue.h"
 
 /* Forward declarations */
 static int cmd_heap_stats_handler(int argc, char **argv);
@@ -138,8 +139,8 @@ static int cmd_task_list_handler(int argc, char **argv)
     (void)argv;
 
     cli_printf("Task List:\r\n");
-    cli_printf("ID   State      Stack Location\r\n");
-    cli_printf("---  ---------  --------------\r\n");
+    cli_printf("ID   Wght  State      Stack Location\r\n");
+    cli_printf("---  ----  ---------  --------------\r\n");
 
     /* Count active tasks */
     uint32_t count = 0;
@@ -158,7 +159,7 @@ static int cmd_task_list_handler(int argc, char **argv)
 
             void *sp = task_get_stack_ptr(t);
             if (sp != NULL) {
-                cli_printf("%u   %s      %x\r\n", task_get_id(t), state_str, (uintptr_t)sp);
+                cli_printf("%u    %u     %-9s  %x\r\n", task_get_id(t), task_get_weight(t), state_str, (uintptr_t)sp);
             } else {
                 cli_printf("Error loacting memory");
             }
@@ -242,38 +243,71 @@ static void task_blink(void *arg)
     }
 }
 
-static void task_button_logger(void *arg)
-{
+/* --- Producer-Consumer Example --- */
+
+typedef struct {
+    uint8_t type;       /* 1=Press, 0=Release */
+    uint32_t timestamp; /* System tick time */
+} button_event_t;
+
+static queue_t *event_queue = NULL;
+
+static void task_event_consumer(void *arg) {
+    (void)arg;
+    button_event_t evt;
+    
+    while (1) {
+        /* Block until an event arrives */
+        if (queue_receive(event_queue, &evt) == 0) {
+            cli_printf("[Event] Button %s at %u ms\r\n", 
+                       evt.type ? "PRESSED" : "RELEASED", 
+                       (unsigned int)evt.timestamp);
+        }
+    }
+}
+
+static void task_button_poll(void *arg) {
     (void)arg;
     button_init();
-
     uint32_t prev_btn = 0;
+    
     while (1) {
         uint32_t btn = button_read();
-
-        if (btn && !prev_btn) {
-            cli_printf("Button pressed\r\n");
-        } else if (!btn && prev_btn) {
-            cli_printf("Button released\r\n");
+        
+        if (btn != prev_btn) {
+            button_event_t evt;
+            evt.type = (uint8_t)btn;
+            evt.timestamp = (uint32_t)platform_get_ticks();
+            
+            /* Send to queue. Blocks if queue is full. */
+            queue_send(event_queue, &evt);
+            
+            prev_btn = btn;
         }
-
-        prev_btn = btn;
-        /* Poll button at 50 Hz without busy-waiting */
-        task_sleep_ticks(20);
+        
+        task_sleep_ticks(20); /* Poll at 50Hz */
     }
 }
 
 static int cmd_blink_handler(int argc, char **argv) {
     (void)argc; (void)argv;
-    task_create(task_blink, NULL, STACK_SIZE_1KB);
+    task_create(task_blink, NULL, STACK_SIZE_1KB, TASK_WEIGHT_LOW);
     cli_printf("Blink task started.\r\n");
     return 0;
 }
 
 static int cmd_logger_handler(int argc, char **argv) {
     (void)argc; (void)argv;
-    task_create(task_button_logger, NULL, STACK_SIZE_1KB);
-    cli_printf("Button logger task started.\r\n");
+    
+    if (event_queue == NULL) {
+        /* Create a queue that can hold 10 events */
+        event_queue = queue_create(sizeof(button_event_t), 10);
+    }
+
+    task_create(task_event_consumer, NULL, STACK_SIZE_1KB, TASK_WEIGHT_NORMAL);
+    task_create(task_button_poll, NULL, STACK_SIZE_1KB, TASK_WEIGHT_HIGH);
+    
+    cli_printf("Button logger tasks started (Producer & Consumer).\r\n");
     return 0;
 }
 

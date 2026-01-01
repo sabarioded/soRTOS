@@ -3,6 +3,7 @@
 #include "utils.h"     /* For strcmp, memset */
 #include <stdarg.h>    /* For cli_printf variable args */
 #include <project_config.h>
+#include "queue.h"
 
 
 static struct {
@@ -14,6 +15,7 @@ static struct {
     cli_getc_fn_t   getc;
     cli_puts_fn_t   puts;
     const char      *prompt;
+    queue_t         *rx_queue;
 } cli_ctx;
 
 
@@ -76,7 +78,7 @@ static void cli_process_cmd(void) {
     cli_ctx.puts(cli_ctx.prompt);
 }
 
-
+/* Print the list of registered commands */
 static void cli_print_help(void) {
     cli_printf("Available commands:\r\n");
     for (uint32_t i = 0; i < cli_ctx.cmd_count; i++) {
@@ -235,6 +237,10 @@ int32_t cli_init(const char *prompt, cli_getc_fn_t getc, cli_puts_fn_t puts) {
     return CLI_OK;
 }
 
+/* Set the input queue for the CLI */
+void cli_set_rx_queue(queue_t *q) {
+    cli_ctx.rx_queue = q;
+}
 
 void cli_task_entry(void *arg) {
     (void)arg;
@@ -245,12 +251,19 @@ void cli_task_entry(void *arg) {
     cli_ctx.puts(cli_ctx.prompt);
 
     while(1) {
-        int ret = cli_ctx.getc(&c); /* 1 if char is read, 0 otherwise */
-
-        if(ret == 0) {
-            /* if no char read wait for 20 ticks */
-            task_sleep_ticks(20); 
-            continue;
+        if (cli_ctx.rx_queue) {
+            /* Block on queue until a character arrives */
+            if (queue_receive(cli_ctx.rx_queue, &c) != 0) {
+                continue;
+            }
+        } else {
+            /* Fallback to polling/notify if no queue set */
+            int ret = cli_ctx.getc(&c); 
+            if(ret == 0) {
+                /* Block until notified by UART ISR (or timeout after 1s) */
+                task_notify_wait(1, 1000); 
+                continue;
+            }
         }
 
         if (c == '\r' || c == '\n') { /* cmd line ended */

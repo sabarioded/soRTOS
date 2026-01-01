@@ -8,7 +8,9 @@
 extern "C" {
 #endif
 
+#ifndef NULL
 #define NULL ((void *)0)
+#endif
 
 /** @brief Wait for specific bits in a register to be SET. Returns 0 on success. */
 int wait_for_flag_set(volatile uint32_t *reg, uint32_t mask, uint32_t max_iter);

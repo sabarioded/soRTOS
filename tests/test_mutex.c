@@ -3,51 +3,42 @@
 #include "scheduler.h"
 #include <string.h>
 #include <setjmp.h>
+#include "allocator.h"
 
-/* --- Mocks & Stubs --- */
+/* Access shared mocks */
+extern jmp_buf yield_jump;
+extern int mock_yield_count;
 
-/* Define the task struct for testing (opaque in scheduler.h) */
-struct task_struct {
-    uint16_t id;
-    task_state_t state;
-};
+/* Access global scheduler state (linked from scheduler.c) */
+extern task_t *task_current;
 
-static task_t tasks[3];
-static task_t *current_task_ptr = NULL;
-static int yield_count = 0;
-static jmp_buf yield_jump; /* Used to break out of blocking loops */
+static uint8_t heap[4096];
+static task_t *t1;
+static task_t *t2;
+static void dummy_task(void *arg) { (void)arg; }
 
-/* Mock: Return the controlled current task */
-void *task_get_current(void) {
-    return current_task_ptr;
-}
-
-/* Mock: Update task state */
-void task_set_state(task_t *t, task_state_t state) {
-    if (t) t->state = state;
-}
-
-/* Mock: Simulate context switch */
-void platform_yield(void) {
-    yield_count++;
-    /* In a real OS, this wouldn't return until scheduled. 
-       In tests, we jump back to the test function to verify blocking behavior. */
-    longjmp(yield_jump, 1);
-}
+extern void (*test_setUp_hook)(void);
+extern void (*test_tearDown_hook)(void);
 
 /* --- Setup / Teardown --- */
 
-void setUp(void) {
-    memset(tasks, 0, sizeof(tasks));
-    tasks[0].id = 1; tasks[0].state = TASK_RUNNING;
-    tasks[1].id = 2; tasks[1].state = TASK_READY;
-    tasks[2].id = 3; tasks[2].state = TASK_READY;
+static void setUp_local(void) {
+    allocator_init(heap, sizeof(heap));
+    scheduler_init();
     
-    current_task_ptr = &tasks[0];
-    yield_count = 0;
+    /* Create real tasks using the scheduler */
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL); /* ID 1 */
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL); /* ID 2 */
+    
+    t1 = scheduler_get_task_by_index(1);
+    t2 = scheduler_get_task_by_index(2);
+    
+    /* Manually set current task to T1 */
+    task_current = t1;
+    mock_yield_count = 0;
 }
 
-void tearDown(void) {}
+static void tearDown_local(void) {}
 
 /* --- Tests --- */
 
@@ -69,8 +60,8 @@ void test_mutex_lock_success(void) {
     mutex_lock(&m);
     
     TEST_ASSERT_EQUAL(1, m.locked);
-    TEST_ASSERT_EQUAL_PTR(&tasks[0], m.owner);
-    TEST_ASSERT_EQUAL(0, yield_count); /* Should not yield */
+    TEST_ASSERT_EQUAL_PTR(t1, m.owner);
+    TEST_ASSERT_EQUAL(0, mock_yield_count); /* Should not yield */
 }
 
 void test_mutex_lock_recursive_handoff(void) {
@@ -82,8 +73,8 @@ void test_mutex_lock_recursive_handoff(void) {
     mutex_lock(&m);
     
     TEST_ASSERT_EQUAL(1, m.locked);
-    TEST_ASSERT_EQUAL_PTR(&tasks[0], m.owner);
-    TEST_ASSERT_EQUAL(0, yield_count);
+    TEST_ASSERT_EQUAL_PTR(t1, m.owner);
+    TEST_ASSERT_EQUAL(0, mock_yield_count);
 }
 
 void test_mutex_contention_blocking(void) {
@@ -94,7 +85,7 @@ void test_mutex_contention_blocking(void) {
     mutex_lock(&m);
     
     /* Switch context to Task 1 */
-    current_task_ptr = &tasks[1];
+    task_current = t2;
     
     /* Task 1 tries to lock. Should block and yield. */
     if (setjmp(yield_jump) == 0) {
@@ -105,9 +96,9 @@ void test_mutex_contention_blocking(void) {
     /* Verify Task 1 was queued and blocked */
     TEST_ASSERT_EQUAL(1, m.count);
     /* Check the queue (tail points to next free, so check tail-1 or 0) */
-    TEST_ASSERT_EQUAL_PTR(&tasks[1], m.wait_queue[0]);
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, tasks[1].state);
-    TEST_ASSERT_EQUAL(1, yield_count);
+    TEST_ASSERT_EQUAL_PTR(t2, m.wait_queue[0]);
+    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t2));
+    TEST_ASSERT_EQUAL(1, mock_yield_count);
 }
 
 void test_mutex_unlock_handoff(void) {
@@ -116,24 +107,26 @@ void test_mutex_unlock_handoff(void) {
     
     /* Setup: Task 0 owns lock, Task 1 is waiting */
     m.locked = 1;
-    m.owner = &tasks[0];
-    m.wait_queue[0] = &tasks[1];
+    m.owner = t1;
+    m.wait_queue[0] = t2;
     m.head = 0;
     m.tail = 1;
     m.count = 1;
-    tasks[1].state = TASK_BLOCKED;
+    task_set_state(t2, TASK_BLOCKED);
     
     /* Task 0 unlocks */
     mutex_unlock(&m);
     
     /* Verify Handoff */
     TEST_ASSERT_EQUAL(1, m.locked); /* Still locked (passed to T1) */
-    TEST_ASSERT_EQUAL_PTR(&tasks[1], m.owner); /* Owner is now T1 */
-    TEST_ASSERT_EQUAL(TASK_READY, tasks[1].state); /* T1 woke up */
+    TEST_ASSERT_EQUAL_PTR(t2, m.owner); /* Owner is now T1 */
+    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t2)); /* T1 woke up */
     TEST_ASSERT_EQUAL(0, m.count); /* Queue empty */
 }
 
 void run_mutex_tests(void) {
+    test_setUp_hook = setUp_local;
+    test_tearDown_hook = tearDown_local;
     UnitySetTestFile("tests/test_mutex.c");
     RUN_TEST(test_mutex_init);
     RUN_TEST(test_mutex_lock_success);
