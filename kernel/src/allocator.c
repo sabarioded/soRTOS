@@ -1,5 +1,6 @@
 #include "allocator.h"
 #include "arch_ops.h"
+#include "utils.h"
 
 /* 8 bytes header */
 typedef struct Block {
@@ -7,7 +8,7 @@ typedef struct Block {
     struct Block* next;
 } Block;
 
-#define IS_FREE_MASK 0x01
+#define IS_FREE_MASK ((size_t)0x01)
 #define NOT_FREE_MASK 0x00
 
 #define GET_SIZE(s)  ((s) & ~IS_FREE_MASK)
@@ -16,9 +17,8 @@ typedef struct Block {
 // hardware-aware alignment
 #define ALIGN_SIZE sizeof(void*) /* how big is a pointer in target machine */
 /* 
- * align size to 4 byte
- * for example for STM32 4 byte we get (size + 00..011) & 11..100 
- * if size=6 we get (6+3) & 11...100 = 00..01001 & 11...100 = 1000 = 8
+ * Align size to machine word size (e.g., 4 bytes on 32-bit, 8 bytes on 64-bit).
+ * This ensures pointers and data structures are properly aligned for the architecture.
  */
 #define ALIGN(size) (((size) + (ALIGN_SIZE - 1)) & ~(ALIGN_SIZE - 1))
 #define UPDATE_SIZE_AND_FREE(size, free) (((size) & ~IS_FREE_MASK) | (free))

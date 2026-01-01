@@ -5,6 +5,18 @@
 #include "platform.h"
 #include "arch_ops.h"
 
+typedef struct task_struct {
+    void     *psp;              /* Platform-agnostic Stack Pointer (Current Top) */
+    uint32_t  sleep_until_tick; /* System Tick count when task should wake */
+    
+    void     *stack_ptr;        /* Pointer to start of allocated memory */
+    size_t    stack_size;       /* Size of allocated stack in bytes */
+    
+    uint8_t   state;            /* Current task state */
+    uint8_t   is_idle;          /* Flag for idle task identification */
+    uint16_t  task_id;          /* Unique Task ID */
+} task_t;
+
 task_t   task_list[MAX_TASKS];
 task_t  *task_current = NULL;
 task_t  *task_next = NULL;
@@ -447,4 +459,42 @@ void scheduler_wake_sleeping_tasks(void)
             task_list[i].sleep_until_tick = 0;
         }
     }
+}
+
+/* Get the handle of the currently running task */
+void *task_get_current(void) {
+    return (void *)task_current;
+}
+
+/* Change the task state. Must be called with IRQs ALREADY disabled. */
+void task_set_state(task_t *t, task_state_t state) {
+    t->state = state;
+}
+
+/* Atomically get the task state */
+task_state_t task_get_state_atomic(task_t *t) {
+    return (task_state_t)t->state;
+}
+
+/* Get the unique ID of a task */
+uint16_t task_get_id(task_t *t) {
+    return t->task_id;
+}
+
+/* Get the allocated stack size of a task */
+size_t task_get_stack_size(task_t *t) {
+    return t->stack_size;
+}
+
+/* Get the pointer to the start of the task's stack memory */
+void* task_get_stack_ptr(task_t *t) {
+    return t->stack_ptr;
+}
+
+/* Get a task handle by index */
+task_t *scheduler_get_task_by_index(uint32_t index) {
+    if (index >= MAX_TASKS) {
+        return NULL;
+    }
+    return &task_list[index];
 }

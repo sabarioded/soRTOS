@@ -24,17 +24,7 @@ typedef enum task_return {
     TASK_DELETE_IS_CURRENT_TASK = -3
 } task_return_t;
 
-typedef struct task_struct {
-    void     *psp;              /* Platform-agnostic Stack Pointer (Current Top) */
-    uint32_t  sleep_until_tick; /* System Tick count when task should wake */
-    
-    void     *stack_ptr;        /* Pointer to start of allocated memory */
-    size_t    stack_size;       /* Size of allocated stack in bytes */
-    
-    uint8_t   state;            /* Current task state */
-    uint8_t   is_idle;          /* Flag for idle task identification */
-    uint16_t  task_id;          /* Unique Task ID */
-} task_t;
+typedef struct task_struct task_t;
 
 /**
  * @brief Initialize the scheduler internal structures.
@@ -117,6 +107,56 @@ void task_block_current(void);
  * @return 0 on success, -1 on error.
  */
 int task_sleep_ticks(uint32_t ticks);
+
+/**
+ * @brief Get the handle of the currently running task.
+ * @return void* Opaque pointer to the current task (can be cast to task_t* internally).
+ */
+void *task_get_current(void);
+
+/**
+ * @brief Change the state of a specific task.
+ * @warning This function does NOT lock interrupts. The caller must ensure 
+ * thread safety (usually by disabling interrupts) before calling.
+ * @param t Pointer to the task.
+ * @param state New state to set.
+ */
+void task_set_state(task_t *t, task_state_t state);
+
+/**
+ * @brief Retrieve the state of a task atomically.
+ * @param t Pointer to the task.
+ * @return The current state of the task.
+ */
+task_state_t task_get_state_atomic(task_t *t);
+
+/**
+ * @brief Get the unique ID of a task.
+ * @param t Pointer to the task.
+ * @return The task ID.
+ */
+uint16_t task_get_id(task_t *t);
+
+/**
+ * @brief Get the allocated stack size of a task.
+ * @param t Pointer to the task.
+ * @return Stack size in bytes.
+ */
+size_t task_get_stack_size(task_t *t);
+
+/**
+ * @brief Get the pointer to the start of the task's stack memory.
+ * @param t Pointer to the task.
+ * @return Pointer to the stack base.
+ */
+void* task_get_stack_ptr(task_t *t);
+
+/**
+ * @brief Get a task handle by index (for iteration/diagnostics).
+ * @param index Index in the task list (0 to MAX_TASKS-1).
+ * @return Pointer to task_t or NULL if index out of bounds.
+ */
+task_t *scheduler_get_task_by_index(uint32_t index);
 
 #ifdef __cplusplus
 }

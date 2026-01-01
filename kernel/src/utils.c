@@ -31,6 +31,7 @@ int wait_for_reg_mask_eq(volatile uint32_t *reg, uint32_t mask, uint32_t expecte
 }
 
 
+#ifndef HOST_PLATFORM
 int atoi(const char *string) {
     int res = 0;
     int interim = 0;
@@ -69,3 +70,4 @@ int strcmp(const char *s1, const char *s2) {
     }
     return *(const unsigned char *)s1 - *(const unsigned char *)s2;
 }
+#endif

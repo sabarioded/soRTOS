@@ -137,8 +137,6 @@ static int cmd_task_list_handler(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    extern task_t task_list[MAX_TASKS];
-
     cli_printf("Task List:\r\n");
     cli_printf("ID   State      Stack Location\r\n");
     cli_printf("---  ---------  --------------\r\n");
@@ -146,9 +144,11 @@ static int cmd_task_list_handler(int argc, char **argv)
     /* Count active tasks */
     uint32_t count = 0;
     for (uint32_t i = 0; i < MAX_TASKS; i++) {
-        if (task_list[i].state != TASK_UNUSED) {
+        task_t *t = scheduler_get_task_by_index(i);
+        task_state_t state = task_get_state_atomic(t);
+        if (state != TASK_UNUSED) {
             const char *state_str;
-            switch (task_list[i].state) {
+            switch (state) {
                 case TASK_READY:    state_str = "READY"; break;
                 case TASK_RUNNING:  state_str = "RUNNING"; break;
                 case TASK_BLOCKED:  state_str = "BLOCKED"; break;
@@ -156,8 +156,9 @@ static int cmd_task_list_handler(int argc, char **argv)
                 default:            state_str = "UNKNOWN"; break;
             }
 
-            if (task_list[i].stack_ptr != NULL) {
-                cli_printf("%u   %s      %x\r\n", task_list[i].task_id, state_str, (uintptr_t)task_list[i].stack_ptr);
+            void *sp = task_get_stack_ptr(t);
+            if (sp != NULL) {
+                cli_printf("%u   %s      %x\r\n", task_get_id(t), state_str, (uintptr_t)sp);
             } else {
                 cli_printf("Error loacting memory");
             }
