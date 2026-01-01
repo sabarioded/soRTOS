@@ -20,6 +20,8 @@ C_SRCS += \
 	$(KERNEL_DIR)/src/scheduler.c \
 	$(KERNEL_DIR)/src/cli.c \
 	$(KERNEL_DIR)/src/allocator.c \
+	$(KERNEL_DIR)/src/mutex.c \
+	$(KERNEL_DIR)/src/semaphore.c \
 	$(KERNEL_DIR)/src/system_clock.c
 
 # --- Common Includes ---
@@ -74,10 +76,11 @@ endif
 # --- Native (Host) Platform Configuration ---
 ifeq ($(PLATFORM), native)
 	CC = gcc
-	CFLAGS = -std=gnu11 -g -O0 -Wall -Wextra $(INCLUDES) -DHOST_PLATFORM
+	CFLAGS = -std=gnu11 -g -O0 -Wall -Wextra -I$(ARCH_DIR)/native -I$(PLATFORM_DIR)/native $(INCLUDES) -DHOST_PLATFORM
 	
-	# Note: You would need to implement platform/native/platform.c for this to link
-	# C_SRCS += $(PLATFORM_DIR)/native/platform.c
+	# Native platform implementation
+	C_SRCS += $(PLATFORM_DIR)/native/platform.c \
+	          $(PLATFORM_DIR)/native/memory_map.c
 	
 	LDFLAGS = 
 endif
@@ -116,9 +119,13 @@ endif
 
 # --- Unit Tests (Native) ---
 NATIVE_CC     = gcc
-NATIVE_CFLAGS = -std=gnu11 -g -Wall $(INCLUDES) -Iexternal/unity/src -DUNIT_TESTING
+NATIVE_CFLAGS = -std=gnu11 -g -Wall -I$(ARCH_DIR)/native $(INCLUDES) -Iexternal/unity/src -DUNIT_TESTING -DHOST_PLATFORM
 UNITY_SRC     = external/unity/src/unity.c
-TEST_SRCS     = tests/test_allocator.c $(KERNEL_DIR)/src/allocator.c $(UNITY_SRC)
+TEST_SRCS     = tests/test_allocator.c $(KERNEL_DIR)/src/allocator.c $(KERNEL_DIR)/src/utils.c \
+                tests/test_mutex.c $(KERNEL_DIR)/src/mutex.c \
+                tests/test_scheduler.c $(KERNEL_DIR)/src/scheduler.c \
+                tests/test_semaphore.c $(KERNEL_DIR)/src/semaphore.c \
+                tests/test_main.c $(UNITY_SRC)
 TEST_BIN      = $(BUILD_DIR)/test_runner
 
 test:
