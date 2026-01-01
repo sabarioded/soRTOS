@@ -1,6 +1,6 @@
 #include "unity.h"
 #include "allocator.h"
-#include "string.h"
+#include <string.h>
 
 #define POOL_SIZE 1024
 #define BLOCK_SIZE 8
@@ -235,8 +235,8 @@ void test_fragment_count_accuracy(void) {
     TEST_ASSERT_EQUAL_INT(1, allocator_get_fragment_count());
 }
 
-int main(void) {
-    UNITY_BEGIN();
+void run_allocator_tests(void) {
+    UnitySetTestFile("tests/test_allocator.c");
     RUN_TEST(test_should_return_pointer_when_requesting_memory);
     RUN_TEST(test_should_return_null_when_pool_is_exhausted);
     RUN_TEST(test_should_allow_multiple_allocations);    
@@ -255,5 +255,4 @@ int main(void) {
     RUN_TEST(test_realloc_shrinking_should_reclaim_space);
     RUN_TEST(test_exhaustion_at_boundary);
     RUN_TEST(test_fragment_count_accuracy);
-    return UNITY_END();
 }
