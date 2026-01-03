@@ -17,14 +17,14 @@ If you're interested in embedded systems, context switching, or just want to see
 I've implemented the core primitives you'd expect in a modern RTOS, keeping the code clean and readable.
 
 ### The Kernel
-*   **Preemptive Scheduler**: A Round-Robin scheduler that uses `PendSV` for context switching. It saves the full CPU context (including FPU registers), so your tasks don't step on each other's toes.
-*   **Task Management**: Create and delete tasks dynamically. There's even a garbage collector running in the Idle task to clean up stack memory from deleted tasks.
+*   **Preemptive Scheduler**: A **Stride Scheduler** (Weighted Fair Queuing) backed by a Min-Heap. It ensures deterministic fairness based on task weights (no starvation!) and scales efficiently (O(log N)). Context switching uses `PendSV` and saves the full CPU context (including FPU).
+*   **Task Management**: Create and delete tasks dynamically. Assign weights to tasks to control CPU allocation. There's even a garbage collector running in the Idle task to clean up stack memory from deleted tasks.
 *   **Software Timers**: Need to blink an LED or timeout an operation? You can schedule one-shot or periodic callbacks without burning a whole task for it.
 
 ### Synchronization & IPC
 *   **Mutexes**: With "Direct Handoff" optimization to prevent priority inversion and race conditions upon wake-up.
 *   **Semaphores**: Counting semaphores for resource tracking, complete with `broadcast` capabilities.
-*   **Message Queues**: Thread-safe, blocking queues for passing data between tasks (or from ISRs to tasks).
+*   **Message Queues**: Thread-safe, blocking queues for passing data between tasks (or from ISRs to tasks). Supports peeking and resetting.
 *   **Task Notifications**: Lightweight signals to wake up specific tasks directly.
 
 ### Memory Management
