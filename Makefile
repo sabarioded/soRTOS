@@ -23,8 +23,7 @@ C_SRCS += \
 	$(KERNEL_DIR)/src/mutex.c \
 	$(KERNEL_DIR)/src/semaphore.c \
 	$(KERNEL_DIR)/src/queue.c \
-	$(KERNEL_DIR)/src/timer.c \
-	$(KERNEL_DIR)/src/system_clock.c
+	$(KERNEL_DIR)/src/timer.c
 
 # --- Common Includes ---
 INCLUDES += \
@@ -49,11 +48,12 @@ ifeq ($(PLATFORM), stm32l476rg)
 		$(PLATFORM_DIR)/stm32l476rg/memory_map.c \
 		$(DRIVERS_DIR)/stm32/uart.c \
 		$(DRIVERS_DIR)/stm32/gpio.c \
+		$(PLATFORM_DIR)/stm32l476rg/system_clock.c \
 		$(DRIVERS_DIR)/stm32/led.c \
 		$(DRIVERS_DIR)/stm32/button.c \
 		$(ARCH_DIR)/arm/cortex_m4/systick.c \
 		$(ARCH_DIR)/arm/cortex_m4/arch_ops.c \
-		startup/stm32l476_startup.c
+		$(PLATFORM_DIR)/stm32l476rg/stm32l476_startup.c
 
 	ASM_SRCS += \
 		$(ARCH_DIR)/arm/cortex_m4/context_switch.S
@@ -64,7 +64,7 @@ ifeq ($(PLATFORM), stm32l476rg)
 		-I$(ARCH_DIR)/arm/cortex_m4
 
 	# Linker
-	LDSCRIPT = $(CONFIG_DIR)/stm32l476rg_flash.ld
+	LDSCRIPT = $(PLATFORM_DIR)/stm32l476rg/stm32l476rg_flash.ld
 	LDFLAGS  = -nostdlib -T $(LDSCRIPT) -Wl,-Map=$(BUILD_DIR)/$(TARGET).map -Wl,--gc-sections
 	
 	# Compiler Flags

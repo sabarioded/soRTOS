@@ -14,7 +14,6 @@ typedef struct Block {
 #define GET_SIZE(s)  ((s) & ~IS_FREE_MASK)
 #define GET_FREE(s)  ((s) & IS_FREE_MASK)
 
-// hardware-aware alignment
 #define ALIGN_SIZE sizeof(void*) /* how big is a pointer in target machine */
 /* 
  * Align size to machine word size (e.g., 4 bytes on 32-bit, 8 bytes on 64-bit).

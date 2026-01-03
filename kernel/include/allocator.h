@@ -33,7 +33,7 @@ void* allocator_malloc(size_t size);
 
 /**
  * @brief Returns a block of memory back to the pool.
- * Marks the block as free and immediately performs coalescing (merging) 
+ * Marks the block as free and immediately performs merging
  * with adjacent free blocks to prevent fragmentation.
  * @param ptr Pointer to the memory block to be freed. If NULL, does nothing.
  */
