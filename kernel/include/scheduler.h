@@ -23,13 +23,6 @@ typedef enum task_state {
     TASK_ZOMBIE,
 } task_state_t;
 
-typedef enum task_return {
-    TASK_DELETE_SUCCESS         = 0,
-    TASK_DELETE_TASK_NOT_FOUND  = -1,
-    TASK_DELETE_IS_IDLE         = -2,
-    TASK_DELETE_IS_CURRENT_TASK = -3
-} task_return_t;
-
 typedef struct task_struct task_t;
 
 /**
@@ -50,10 +43,11 @@ void scheduler_start(void);
 void schedule_next_task(void);
 
 /**
- * @brief Internal function: wake up any sleeping tasks whose wake-up time has arrived.
- * @note Called by System Tick Handler.
+ * @brief Process a system tick. Updates time slices and wakes sleeping tasks.
+ * @note Called by System Tick Handler (ISR).
+ * @return 1 if a context switch is required (slice expired or preemption), 0 otherwise.
  */
-void scheduler_wake_sleeping_tasks(void);
+uint32_t scheduler_tick(void);
 
 /**
  * @brief Create a new task.
@@ -68,7 +62,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
 /**
  * @brief Delete a task.
  * @param task_id ID of the task to delete.
- * @return TASK_DELETE_SUCCESS on success, otherwise error code.
+ * @return 0 on success, otherwise error code.
  */
 int32_t task_delete(uint16_t task_id);
 
@@ -105,15 +99,6 @@ void task_unblock(task_t *task);
  * @brief Block the currently running task.
  */
 void task_block_current(void);
-
-/**
- * @brief Sleep the current task for a specified number of System Ticks.
- * The task will be moved to BLOCKED state and automatically unblocked
- * when the system tick counter reaches the wake-up time.
- * * @param ticks Number of ticks to sleep (must be > 0).
- * @return 0 on success, -1 on error.
- */
-int task_sleep_ticks(uint32_t ticks);
 
 /**
  * @brief Wait for a notification.

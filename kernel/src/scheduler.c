@@ -5,8 +5,9 @@
 #include "platform.h"
 #include "arch_ops.h"
 
-/* Stride constant: Large number to allow integer division for stride calc */
-#define STRIDE_CONSTANT 1000000
+/* Time Slice Configuration */
+#define BASE_SLICE_TICKS    2       /* Base ticks per weight unit */
+#define VRUNTIME_SCALER     1000    /* Scaling factor for vruntime calc */
 
 typedef struct task_struct {
     void     *psp;              /* Platform-agnostic Stack Pointer (Current Top) */
@@ -19,33 +20,41 @@ typedef struct task_struct {
     uint8_t   is_idle;          /* Flag for idle task identification */
     uint16_t  task_id;          /* Unique Task ID */
     
-    /* Stride Scheduling Fields */
     uint8_t   weight;           /* User assigned weight */
-    uint32_t  stride;           /* STRIDE_CONSTANT / weight */
-    uint64_t  pass;             /* Virtual runtime (accumulated stride) */
-    int32_t   heap_index;       /* Index in ready_heap (-1 if not in heap) */
+    uint32_t  time_slice;       /* Remaining ticks in current slice */
+    uint64_t  vruntime;         /* Virtual runtime (fairness metric) */
+    int32_t   heap_index;       /* Index in ready_heap (-1 if not in heap) */   
     
     uint32_t  notify_val;       /* Task notification value */
     uint8_t   notify_state;     /* 0: None, 1: Pending */
+    struct task_struct *next;   /* Link for Sleep/Free/Zombie lists */
 } task_t;
 
-task_t   task_list[MAX_TASKS];
-task_t  *task_current = NULL;
-task_t  *task_next = NULL;
+task_t      task_list[MAX_TASKS];
+task_t      *task_current = NULL;
 
-/* Min-Heap for Ready Tasks (ordered by 'pass') */
-static task_t *ready_heap[MAX_TASKS];
-static uint32_t heap_size = 0;
+/* Min-Heap for Ready Tasks (ordered by 'vruntime') */
+static task_t       *ready_heap[MAX_TASKS];
+static uint32_t     heap_size = 0;
 
-static uint32_t task_count = 0;
-static uint32_t task_current_index = 0;
-static uint16_t next_task_id = 0;
-static task_t *idle_task = NULL;
+/* Delta List for Sleeping Tasks */
+static task_t *sleep_list_head = NULL;
+static task_t *free_list = NULL;
+static task_t *zombie_list = NULL;
 
-/* --- Heap Helper Functions --- */
+static uint32_t     task_count = 0;
+static uint16_t     next_task_id = 0;
+static task_t       *idle_task = NULL;
+
+/**
+ * The heap is implemented by a tree flattened into an array.
+ * Parent: (index-1)/2
+ * Left child: (2 * index) + 1
+ * Right child (2 * index) + 2
+ */
 
 /* Swap two tasks in the heap and update their index tracking */
-static void swap_tasks(uint32_t i, uint32_t j) {
+static void _swap_tasks(uint32_t i, uint32_t j) {
     task_t *temp = ready_heap[i];
     ready_heap[i] = ready_heap[j];
     ready_heap[j] = temp;
@@ -56,11 +65,11 @@ static void swap_tasks(uint32_t i, uint32_t j) {
 }
 
 /* Bubble up an element to maintain min-heap property */
-static void heap_up(uint32_t index) {
+static void _heap_up(uint32_t index) {
     while (index > 0) {
         uint32_t parent = (index - 1) / 2;
-        if (ready_heap[index]->pass < ready_heap[parent]->pass) {
-            swap_tasks(index, parent);
+        if (ready_heap[index]->vruntime < ready_heap[parent]->vruntime) {
+            _swap_tasks(index, parent);
             index = parent;
         } else {
             break;
@@ -69,21 +78,21 @@ static void heap_up(uint32_t index) {
 }
 
 /* Bubble down an element to maintain min-heap property */
-static void heap_down(uint32_t index) {
+static void _heap_down(uint32_t index) {
     while (1) {
-        uint32_t left = 2 * index + 1;
-        uint32_t right = 2 * index + 2;
+        uint32_t left = 2 * index + 1; /* left child */
+        uint32_t right = 2 * index + 2; /* right child */
         uint32_t smallest = index;
 
-        if (left < heap_size && ready_heap[left]->pass < ready_heap[smallest]->pass) {
+        if (left < heap_size && ready_heap[left]->vruntime < ready_heap[smallest]->vruntime) {
             smallest = left;
         }
-        if (right < heap_size && ready_heap[right]->pass < ready_heap[smallest]->pass) {
+        if (right < heap_size && ready_heap[right]->vruntime < ready_heap[smallest]->vruntime) {
             smallest = right;
         }
 
         if (smallest != index) {
-            swap_tasks(index, smallest);
+            _swap_tasks(index, smallest);
             index = smallest;
         } else {
             break;
@@ -92,18 +101,22 @@ static void heap_down(uint32_t index) {
 }
 
 /* Insert a task into the priority queue */
-static void heap_insert(task_t *t) {
-    if (heap_size >= MAX_TASKS) return;
-    
+static void _heap_insert(task_t *t) {
+    if (heap_size >= MAX_TASKS) {
+        return;
+    }
+
     t->heap_index = heap_size;
     ready_heap[heap_size] = t;
     heap_size++;
-    heap_up(heap_size - 1);
+    _heap_up(heap_size - 1);
 }
 
-/* Extract the task with the lowest pass value (highest priority) */
-static task_t* heap_pop_min(void) {
-    if (heap_size == 0) return NULL;
+/* Extract the task with the lowest vruntime value (highest priority) */
+static task_t* _heap_pop_min(void) {
+    if (heap_size == 0) {
+        return NULL;
+    }
     
     task_t *min = ready_heap[0];
     min->heap_index = -1; /* Mark as not in heap */
@@ -112,14 +125,16 @@ static task_t* heap_pop_min(void) {
     if (heap_size > 0) {
         ready_heap[0] = ready_heap[heap_size];
         ready_heap[0]->heap_index = 0;
-        heap_down(0);
+        _heap_down(0);
     }
     return min;
 }
 
 /* Remove a specific task from the middle of the heap */
-static void heap_remove(task_t *t) {
-    if (t->heap_index == -1 || t->heap_index >= (int32_t)heap_size) return;
+static void _heap_remove(task_t *t) {
+    if (t->heap_index == -1 || t->heap_index >= (int32_t)heap_size) {
+        return;
+    }
     
     uint32_t index = (uint32_t)t->heap_index;
     t->heap_index = -1;
@@ -131,19 +146,104 @@ static void heap_remove(task_t *t) {
         ready_heap[index]->heap_index = index;
         
         /* Rebalance (could go up or down) */
-        heap_up(index);
-        heap_down(index);
+        _heap_up(index);
+        _heap_down(index);
     }
 }
 
-/* Get the minimum pass value currently in the system to prevent starvation of new tasks */
-static uint64_t get_min_pass(void) {
-    if (heap_size > 0) return ready_heap[0]->pass;
-    return (task_current) ? task_current->pass : 0;
+/* Get the minimum vruntime value currently in the system */
+static uint64_t _get_min_vruntime(void) {
+    if (heap_size > 0) {
+        return ready_heap[0]->vruntime;
+    }
+    return (task_current) ? task_current->vruntime : 0;
+}
+
+/* Remove task from sleep list */
+static void _remove_from_sleep_list(task_t *task) {
+    if (task == NULL) return;
+
+    /* Case 1: Removing head */
+    if (sleep_list_head == task) {
+        sleep_list_head = task->next;
+        task->next = NULL;
+        return;
+    }
+
+    /* Case 2: Removing from middle */
+    task_t *curr = sleep_list_head;
+    while (curr != NULL && curr->next != task) {
+        curr = curr->next;
+    }
+
+    if (curr != NULL) {
+        curr->next = task->next;
+        task->next = NULL;
+    }
+}
+
+/* Insert task into sleep list (sorted by wake-up time) */
+static void _insert_into_sleep_list(task_t *task) {
+    if (task == NULL) return;
+
+    /* Assumes task->sleep_until_tick is already set to absolute tick */
+
+    /* Case 1: Empty list or new head */
+    if (sleep_list_head == NULL || task->sleep_until_tick < sleep_list_head->sleep_until_tick) {
+        task->next = sleep_list_head;
+        sleep_list_head = task;
+    } else {
+        /* Case 2: Insert in the middle */
+        task_t *curr = sleep_list_head;
+        while (curr->next != NULL && curr->next->sleep_until_tick < task->sleep_until_tick) {
+            curr = curr->next;
+        }
+        task->next = curr->next;
+        curr->next = task;
+    }
+}
+
+static void inline _wake_sleeping_task(task_t *task) {
+     task->state = TASK_READY;
+     /* Insert into heap */
+     uint64_t min_v = _get_min_vruntime();
+     if (task->vruntime < min_v) task->vruntime = min_v;
+     _heap_insert(task);
+}
+
+static void _process_sleep_list(uint32_t current_ticks) {
+    task_t *curr = sleep_list_head;
+
+    /* Process tasks at head of the list whose time has come */
+    while (curr != NULL && (int32_t)(current_ticks - curr->sleep_until_tick) >= 0) {
+        _remove_from_sleep_list(curr);
+        _wake_sleeping_task(curr);
+        curr = sleep_list_head;  /* Peek at new head */
+    }
+}
+
+/* Internal helper: Unblock a task (Assumes Lock Held) */
+static void _unblock_task(task_t *task) {
+    if (task->state == TASK_BLOCKED) {
+        /* Remove from sleep list if it was waiting with timeout */
+        if (task->sleep_until_tick > 0) {
+            _remove_from_sleep_list(task);
+            task->sleep_until_tick = 0;
+        }
+
+        task->state = TASK_READY;
+        
+        /* Update vruntime to avoid starvation/monopoly */
+        uint64_t min_v = _get_min_vruntime();
+        if (task->vruntime < min_v) {
+            task->vruntime = min_v;
+        }
+        _heap_insert(task);
+    }
 }
 
 /* Idle task function */
-static void task_idle_function(void *arg) {
+static void _task_idle_function(void *arg) {
     (void)arg; /* Unused parameter */
     
     static size_t last_gc_tick = 0;
@@ -163,13 +263,13 @@ static void task_idle_function(void *arg) {
 }
 
 /* Create the idle task */
-static void task_create_idle(void) {
+static void _task_create_idle(void) {
     if (idle_task != NULL) {
         return; 
     }
 
     /* Create idle task with minimal stack */
-    int32_t task_id = task_create(task_idle_function, NULL, STACK_SIZE_512B, TASK_WEIGHT_IDLE);
+    int32_t task_id = task_create(_task_idle_function, NULL, STACK_SIZE_512B, TASK_WEIGHT_IDLE);
 
     if (task_id < 0) {
         /* Failed to create idle task - this is a critical system failure */
@@ -178,7 +278,7 @@ static void task_create_idle(void) {
     }
 
     /* Mark the newly created task as the IDLE task */
-    for (uint32_t i = 0; i < task_count; ++i) {
+    for (uint32_t i = 0; i < MAX_TASKS; ++i) {
         if(task_list[i].task_id == task_id) {
             idle_task = &task_list[i];
             idle_task->is_idle = 1;
@@ -191,35 +291,34 @@ static void task_create_idle(void) {
 void scheduler_init(void) {
     memset(task_list, 0, sizeof(task_list));
     task_current = NULL;
-    task_next = NULL;
     task_count = 0;
-    task_current_index = 0;
     next_task_id = 0;
     idle_task = NULL;
     heap_size = 0;
+
+    /* Initialize Free List */
+    for (uint32_t i = 0; i < MAX_TASKS - 1; ++i) {
+        task_list[i].next = &task_list[i+1];
+    }
+    task_list[MAX_TASKS - 1].next = NULL;
+    free_list = &task_list[0];
 }
 
 /* Start the scheduler */
 void scheduler_start(void) {
-    /* Ensure we have at least one task (or create idle if allowed) */
-    if (task_count == 0) {
-        task_create_idle(); 
-    } else {
-        /* Even if user tasks exist, we MUST have an idle task for fallback */
-        task_create_idle();
+    if (task_count == 0 || idle_task == NULL) {
+        _task_create_idle(); 
     }
 
-    /* Pick the best task to start with */
-    task_t *best = heap_pop_min();
+    /* Pick the task to start with */
+    task_t *min_vrt_task = _heap_pop_min();
     
-    if (best == NULL) {
+    if (min_vrt_task == NULL) {
         platform_panic();
         return;
     }
 
-    task_current = best;
-    task_next = best;
-    task_current_index = (uint32_t)(best - task_list);
+    task_current = min_vrt_task;
     
     /* Mark first task as running */
     task_current->state = TASK_RUNNING;
@@ -245,72 +344,77 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
 
     uint32_t stat = arch_irq_lock();
 
-    /* Check limit inside lock to prevent race condition */
-    if (task_count >= MAX_TASKS) {
+    if (free_list == NULL) {
         arch_irq_unlock(stat);
         return -1;
     }
-
-    /* Find unused task slot */
-    uint32_t unused_task_index = task_count;
-    task_t *new_task = &task_list[task_count]; /* Default to appending */
-
-    for (uint32_t i = 0; i < task_count; ++i) {
-        if (task_list[i].state == TASK_UNUSED) {
-            new_task = &task_list[i];
-            unused_task_index = i;
-            break;
-        }
-    }
+    task_t *new_task = free_list;
+    free_list = free_list->next;
+    new_task->next = NULL; /* Detach from free list */
 
     /* Allocate stack from heap */
     uint32_t *stack_base = (uint32_t*)allocator_malloc(stack_size_bytes);
     if (stack_base == NULL) {
+        /* Rollback: Return task to free list */
+        new_task->next = free_list;
+        free_list = new_task;
         arch_irq_unlock(stat);
         return -1;  /* Allocation failed */
     }
 
-    /* Calculate Top of Stack */
-    /* Stack grows down, so "Top" is at the highest address */
+    /* Calculate Top of Stack (highest address). Remmber stack grows down */
     uint32_t *stack_end = (uint32_t*)((uint8_t*)stack_base + stack_size_bytes);
 
-    /* Enforce platform alignment on stack top address */
-    /* Note: casting to uintptr_t is safer for bitwise ops on addresses */
-    uintptr_t stack_addr = (uintptr_t)stack_end;
-    stack_addr &= ~(uintptr_t)(PLATFORM_STACK_ALIGNMENT - 1);
-    stack_end = (uint32_t *)stack_addr;
-
-    /* Initialize Task Structure */
-    new_task->stack_ptr = stack_base;     /* Save base for free() */
-    new_task->stack_size   = stack_size_bytes;
+    /* Initialize task structure */
+    new_task->stack_ptr     = stack_base;     /* Save base for free */
+    new_task->stack_size    = stack_size_bytes;
     
     /* Initialize Task Context (Platform Specific) */
     new_task->psp = platform_initialize_stack(stack_end, task_func, arg, task_exit);
     
     new_task->state = TASK_READY;
     new_task->is_idle = 0;
-    new_task->task_id = ++next_task_id;
+
+    /* Ensure task_id is never 0, as 0 is used as a sentinel/invalid ID */
+    /* Generate unique Task ID to avoid collisions on wrap-around */
+    uint16_t start_id = next_task_id;
+    while (1) {
+        if (++next_task_id == 0) next_task_id = 1;
+        
+        int collision = 0;
+        task_t *t = task_list;
+        for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
+            if (t->state != TASK_UNUSED && t->task_id == next_task_id) {
+                collision = 1;
+                break;
+            }
+        }
+        if (!collision) break;
+        if (next_task_id == start_id) break; /* Should be impossible if free_list check passed */
+    }
+    new_task->task_id = next_task_id;
+
     new_task->sleep_until_tick = 0;
     new_task->notify_val = 0;
     new_task->notify_state = 0;
     
-    /* Stride Init */
-    if (weight == 0) weight = 1;
+    /* Time Slice & VRuntime Init */
+    if (weight == 0) {
+        weight = 1;
+    }
     new_task->weight = weight;
-    new_task->stride = STRIDE_CONSTANT / weight;
-    new_task->pass = get_min_pass(); /* Start fair */
+    new_task->time_slice = weight * BASE_SLICE_TICKS;
+    new_task->vruntime = _get_min_vruntime(); /* Start fair */
     new_task->heap_index = -1;
 
     /* Add to ready heap immediately */
-    heap_insert(new_task);
+    _heap_insert(new_task);
 
     /* Set stack canary at the bottom for overflow detection */
     stack_base[0] = STACK_CANARY;
 
-    /* Update count if we appended a new task */
-    if (unused_task_index == task_count) {
-        task_count++;
-    }
+    /* Increment active task count */
+    task_count++;
 
     arch_irq_unlock(stat);
 
@@ -319,42 +423,62 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
 
 /* Delete a task */
 int32_t task_delete(uint16_t task_id) {
-    uint32_t stat = arch_irq_lock();
+    if (task_id == 0) {
+        return -1;
+    }
 
+    /* Optimization: Check if trying to delete self (O(1)) */
+    if (task_current && task_current->task_id == task_id) {
+        task_exit();
+        return 0; /* Unreachable */
+    }
+
+    /* Optimization: Find task without locking first (reduces interrupt latency) */
     task_t *task_to_delete = NULL;
-
-    for (uint32_t i = 0; i < task_count; ++i) {
-        if (task_list[i].task_id == task_id) {
-            task_to_delete = &task_list[i];
+    task_t *t = task_list;
+    for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
+        if (t->task_id == task_id) {
+            task_to_delete = t;
             break;
         }
     }
-
+    
     if (task_to_delete == NULL) {
+        return -1;
+    }
+
+    uint32_t stat = arch_irq_lock();
+
+    /* Verify task is still valid and ID matches (in case it changed before lock) */
+    if (task_to_delete->state == TASK_UNUSED || task_to_delete->state == TASK_ZOMBIE || task_to_delete->task_id != task_id) {
         arch_irq_unlock(stat);
-        return TASK_DELETE_TASK_NOT_FOUND;
+        return -1;
     }
 
     if (task_to_delete->is_idle) {
         arch_irq_unlock(stat);
-        return TASK_DELETE_IS_IDLE;
-    }
-    
-    if (task_to_delete == task_current) {
-        arch_irq_unlock(stat);
-        return TASK_DELETE_IS_CURRENT_TASK; 
+        return -1;
     }
 
     /* Remove from heap if it's there */
-    heap_remove(task_to_delete);
+    _heap_remove(task_to_delete);
+    
+    /* Remove from sleep list if it's there */
+    if (task_to_delete->sleep_until_tick > 0) {
+        _remove_from_sleep_list(task_to_delete);
+    }
 
     /* Mark task as zombie. Its stack will be freed in garbage collection. */
     task_to_delete->state = TASK_ZOMBIE;
     task_to_delete->task_id = 0;
+    
+    /* Add to zombie list for GC */
+    task_to_delete->next = zombie_list;
+    zombie_list = task_to_delete;
 
     arch_irq_unlock(stat);
 
-    return TASK_DELETE_SUCCESS;
+    return 0;
 }
 
 /* Task voluntarily exits */
@@ -364,6 +488,10 @@ void task_exit(void) {
     if (task_current != NULL) {
         task_current->state = TASK_ZOMBIE;
         task_current->task_id = 0;
+        
+        /* Add to zombie list for GC */
+        task_current->next = zombie_list;
+        zombie_list = task_current;
     }
     
     arch_irq_unlock(stat);
@@ -378,68 +506,60 @@ void task_exit(void) {
 void schedule_next_task(void) {
     uint32_t stat = arch_irq_lock();
 
-    if (task_count == 0) {
+    if (task_count == 0 && idle_task == NULL) {
         arch_irq_unlock(stat);
         return;
     }
 
-    if (task_current == NULL) {
-        /* Should happen only at very first start */
-        task_current_index = 0;
-        task_current = &task_list[0];
-        task_current->state = TASK_RUNNING;
-        task_next = task_current;
-        arch_irq_unlock(stat);
-        return;
-    }
-    
-    /* 1. Handle Current Task */
+    /* Handle Current Task */
     if (task_current && task_current->state == TASK_RUNNING) {
         /* It was running, so it yielded or was preempted. */
         task_current->state = TASK_READY;
+
+        /* Calculate actual ticks consumed */
+        uint32_t max_slice = task_current->weight * BASE_SLICE_TICKS;
+        uint32_t ticks_ran = max_slice - task_current->time_slice;
+        if (ticks_ran == 0) {
+            ticks_ran = 1; /* Minimum charge to prevent free yields */
+        }
+
+        /* 
+         * Update vruntime:
+         * vruntime += (ticks_ran * SCALER) / weight
+         */
+        task_current->vruntime += (uint64_t)(ticks_ran * VRUNTIME_SCALER) / task_current->weight;
         
-        /* Charge for execution */
-        task_current->pass += task_current->stride;
-        
+        /* Replenish Time Slice */
+        task_current->time_slice = max_slice;
+
         /* Put back into heap */
-        heap_insert(task_current);
+        _heap_insert(task_current);
     }
 
-    /* 2. Pick Next Task from Heap */
-    task_t *best = heap_pop_min();
+    /* Pick Next Task from Heap */
+    task_t *best = _heap_pop_min();
     
     if (best != NULL) {
         /* Found a user task */
-        task_next = best;
-        /* Update current index pointer (legacy support for garbage collector) */
-        /* Note: task_current_index is less relevant with heap but kept for consistency */
-        task_current_index = (uint32_t)(best - task_list); 
-        task_next->state = TASK_RUNNING;
+        task_current = best;
+        task_current->state = TASK_RUNNING;
         arch_irq_unlock(stat);
         return;
     }
 
     /* If no READY user task found, schedule IDLE task */
     if (idle_task != NULL && idle_task->state == TASK_READY) {
-        task_next = idle_task;
-        task_next->state = TASK_RUNNING;
+        task_current = idle_task;
+        task_current->state = TASK_RUNNING;
 
-        /* Update index to point to idle task so next search starts after it */
-        for (uint32_t i = 0; i < task_count; i++) {
-            if (&task_list[i] == idle_task) {
-                task_current_index = i;
-                break;
-            }
-        }
         arch_irq_unlock(stat);
         return;
     }
 
     /* Fallback: if absolutely nothing is ready (shouldn't happen if idle exists), just stay */
-    /* Ensure we don't switch to a blocked task */
     if (task_current->state == TASK_READY || task_current->state == TASK_RUNNING) {
-        task_next = task_current;
-        task_next->state = TASK_RUNNING;
+        /* task_current remains the same */
+        task_current->state = TASK_RUNNING;
     } else {
         /* If current is blocked and no idle task, we have a critical failure */
         platform_panic();
@@ -452,58 +572,22 @@ void schedule_next_task(void) {
 void task_garbage_collection(void) {
     uint32_t stat = arch_irq_lock();
     
-    uint32_t read_idx = 0;
-    uint32_t write_idx = 0;
-    
-    while (read_idx < task_count) {
-        /* Check if task is dead */
-        if (task_list[read_idx].state == TASK_ZOMBIE) {
-            /* Free the stack memory */
-            if (task_list[read_idx].stack_ptr != NULL) {
-                allocator_free(task_list[read_idx].stack_ptr);
-                task_list[read_idx].stack_ptr = NULL;
-            }
-            /* Ensure it's not in heap (should have been removed in delete/exit) */
-            if (task_list[read_idx].heap_index != -1) {
-                heap_remove(&task_list[read_idx]);
-            }
-            task_list[read_idx].state = TASK_UNUSED;
+    while (zombie_list != NULL) {
+        task_t *t = zombie_list;
+        zombie_list = t->next;
+        
+        /* Free the stack memory */
+        if (t->stack_ptr != NULL) {
+            allocator_free(t->stack_ptr);
+            t->stack_ptr = NULL;
         }
-
-        /* If task is active (or just freed/unused), compact list */
-        if (task_list[read_idx].state != TASK_UNUSED) {
-            if (read_idx != write_idx) {
-                /* Move task struct to fill gap */
-                task_list[write_idx] = task_list[read_idx];
-                
-                /* Fix up global pointers if they pointed to the moved task */
-                if (&task_list[read_idx] == task_current) {
-                    task_current = &task_list[write_idx];
-                    task_current_index = write_idx;
-                }
-
-                if (&task_list[read_idx] == task_next) {
-                    task_next = &task_list[write_idx];
-                }
-
-                if (idle_task == &task_list[read_idx]) {
-                    idle_task = &task_list[write_idx];
-                }
-                
-                /* Update heap pointer if this task is in the heap */
-                if (task_list[write_idx].heap_index != -1) {
-                    ready_heap[task_list[write_idx].heap_index] = &task_list[write_idx];
-                }
-            }
-            write_idx++;
-        }
-        read_idx++;
+        
+        t->state = TASK_UNUSED;
+        t->next = free_list;
+        free_list = t;
+        
+        if (task_count > 0) task_count--;
     }
-    
-    task_count = write_idx;
-
-    /* Zero out the now-unused slots at the end */
-    memset(&task_list[task_count], 0, (MAX_TASKS - task_count) * sizeof(task_t));
 
     arch_irq_unlock(stat);
 }
@@ -513,20 +597,22 @@ void task_check_stack_overflow(void) {
     uint32_t current_task_overflow = 0;
     uint32_t stat = arch_irq_lock();
 
-    for (uint32_t i = 0; i < task_count; ++i) {
-        if (task_list[i].state != TASK_UNUSED) {
+    task_t *t = task_list;
+    for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
+        if (t->state != TASK_UNUSED) {
             /* Use stack_ptr (void*) and cast to check canary */
-            uint32_t *stack_base = (uint32_t*)task_list[i].stack_ptr;
+            uint32_t *stack_base = (uint32_t*)t->stack_ptr;
 
             if (stack_base != NULL && stack_base[0] != STACK_CANARY) {
-                if (&task_list[i] == task_current) {
+                if (t == task_current) {
                     current_task_overflow = 1;
                 } else {
                     /* Kill other tasks immediately */
-                    uint16_t id_to_delete = task_list[i].task_id;
-                    arch_irq_unlock(stat);
-                    task_delete(id_to_delete);
-                    stat = arch_irq_lock();
+                    uint16_t id_to_delete = t->task_id;
+                    /* Only delete active tasks (ZOMBIEs are already dead/ID=0) */
+                    if (id_to_delete != 0) {
+                        task_delete(id_to_delete);
+                    }
                 }
             }
         }
@@ -534,21 +620,22 @@ void task_check_stack_overflow(void) {
 
     arch_irq_unlock(stat);
 
-    /* If current task overflowed, we cannot continue safely */
     if (current_task_overflow) {
-        task_exit();
+        platform_panic();
     }
 }
 
 /* Block a task */
 void task_block(task_t *task) {
-    if (task == NULL) return;
+    if (task == NULL) {
+        return;
+    }
 
     uint32_t stat = arch_irq_lock();
     if (task->state != TASK_UNUSED && !task->is_idle) {
         /* If it was READY, remove from heap */
         if (task->state == TASK_READY) {
-            heap_remove(task);
+            _heap_remove(task);
         }
         task->state = TASK_BLOCKED;
     }
@@ -557,16 +644,12 @@ void task_block(task_t *task) {
 
 /* Unblock a task */
 void task_unblock(task_t *task) {
-    if (task == NULL) return;
+    if (task == NULL) {
+        return;
+    }
 
     uint32_t stat = arch_irq_lock();
-    if (task->state == TASK_BLOCKED) {
-        task->state = TASK_READY;
-        /* Update pass to avoid starvation/monopoly */
-        uint64_t min_pass = get_min_pass();
-        if (task->pass < min_pass) task->pass = min_pass;
-        heap_insert(task);
-    }
+    _unblock_task(task);
     arch_irq_unlock(stat);
 }
 
@@ -582,7 +665,7 @@ void task_block_current(void) {
     platform_yield();
 }
 
-/* Sleep for N ticks */
+/* Update wake-up time and add to sleep list */
 int task_sleep_ticks(uint32_t ticks)
 {
     if (ticks == 0 || task_current == NULL) {
@@ -591,18 +674,18 @@ int task_sleep_ticks(uint32_t ticks)
 
     uint32_t stat = arch_irq_lock();
 
-    /* Set wake-up time */
-    uint32_t wake_tick = (uint32_t)platform_get_ticks() + ticks;
-    if (wake_tick == 0) {
-        wake_tick = 1; /* Ensure 0 is not used as it indicates 'not sleeping' */
-    }
-    task_current->sleep_until_tick = wake_tick;
+    /* Remove from sleep list if already there */
+    _remove_from_sleep_list(task_current);
+
+    task_current->sleep_until_tick = (uint32_t)platform_get_ticks() + ticks;
 
     /* Block task */
     if (task_current->state != TASK_UNUSED && !task_current->is_idle) {
         task_current->state = TASK_BLOCKED;
         /* Not in heap, so no remove needed */
     }
+
+    _insert_into_sleep_list(task_current);
 
     arch_irq_unlock(stat);
 
@@ -621,6 +704,7 @@ uint32_t task_notify_wait(uint8_t clear_on_exit, uint32_t wait_ticks) {
             /* Set wake-up time if not infinite wait */
             if (wait_ticks != UINT32_MAX) {
                 task_current->sleep_until_tick = (uint32_t)platform_get_ticks() + wait_ticks;
+                _insert_into_sleep_list(task_current);
             }
             task_current->state = TASK_BLOCKED;
             /* Not in heap */
@@ -655,48 +739,50 @@ uint32_t task_notify_wait(uint8_t clear_on_exit, uint32_t wait_ticks) {
 void task_notify(uint16_t task_id, uint32_t value) {
     uint32_t stat = arch_irq_lock();
     
-    for (uint32_t i = 0; i < task_count; ++i) {
-        if (task_list[i].task_id == task_id) {
-            task_list[i].notify_val |= value;
-            task_list[i].notify_state = 1;
-            if (task_list[i].state == TASK_BLOCKED) {
-                task_list[i].state = TASK_READY;
-                /* Insert into heap */
-                uint64_t min_pass = get_min_pass();
-                if (task_list[i].pass < min_pass) task_list[i].pass = min_pass;
-                heap_insert(&task_list[i]);
-            }
+    task_t *t = task_list;
+    for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
+        if (t->state != TASK_UNUSED && t->task_id == task_id) {
+            t->notify_val |= value;
+            t->notify_state = 1;
+            _unblock_task(t);
             break;
         }
     }
     arch_irq_unlock(stat);
 }
 
-/* Wake up sleeping tasks (Called by System Tick Handler) */
-void scheduler_wake_sleeping_tasks(void)
+/* Process System Tick (Called by ISR) */
+uint32_t scheduler_tick(void)
 {
-    /* Note: Tick Handler is usually in an interrupt context, 
-       so we might not strictly need irq_lock if priorities are right,
-       but locking here is safe practice. */
     uint32_t stat = arch_irq_lock();
+    uint32_t need_reschedule = 0;
     
     uint32_t current_ticks = (uint32_t)platform_get_ticks();
 
-    for (uint32_t i = 0; i < task_count; ++i) {
-        if (task_list[i].state == TASK_BLOCKED && 
-            task_list[i].sleep_until_tick != 0 &&
-            (int32_t)(current_ticks - task_list[i].sleep_until_tick) >= 0) {
-            
-            task_list[i].state = TASK_READY;
-            /* Insert into heap */
-            uint64_t min_pass = get_min_pass();
-            if (task_list[i].pass < min_pass) task_list[i].pass = min_pass;
-            heap_insert(&task_list[i]);
-            task_list[i].sleep_until_tick = 0;
+    _process_sleep_list(current_ticks);
+
+    /* 2. Update Time Slice for Current Task */
+    if (task_current && task_current->state == TASK_RUNNING && !task_current->is_idle) {
+        if (task_current->time_slice > 0) {
+            task_current->time_slice--;
+        }
+
+        /* If slice expired, trigger switch */
+        if (task_current->time_slice == 0) {
+            need_reschedule = 1;
         }
     }
 
+    /* Check if we need to preempt current task for a higher priority one (lower vruntime) */
+    /* Note: process_sleep_list might have woken a task with lower vruntime */
+    uint64_t min_v = _get_min_vruntime();
+    if (task_current && task_current->vruntime > min_v) {
+        need_reschedule = 1;
+    }
+
+
     arch_irq_unlock(stat);
+    return need_reschedule;
 }
 
 /* Get the handle of the currently running task */
@@ -710,15 +796,15 @@ void task_set_state(task_t *t, task_state_t state) {
 
     /* Handle Heap Management */
     if (t->state == TASK_READY && state != TASK_READY) {
-        heap_remove(t);
+        _heap_remove(t);
     }
     
     t->state = state;
     
     if (state == TASK_READY) {
-        uint64_t min_pass = get_min_pass();
-        if (t->pass < min_pass) t->pass = min_pass;
-        heap_insert(t);
+        uint64_t min_v = _get_min_vruntime();
+        if (t->vruntime < min_v) t->vruntime = min_v;
+        _heap_insert(t);
     }
 
     arch_irq_unlock(stat);
