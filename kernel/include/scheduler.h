@@ -101,6 +101,14 @@ void task_unblock(task_t *task);
 void task_block_current(void);
 
 /**
+ * @brief Put the current task to sleep for a specific number of ticks.
+ * 
+ * @param ticks Number of system ticks to sleep.
+ * @return 0 on success, -1 on error.
+ */
+int task_sleep_ticks(uint32_t ticks);
+
+/**
  * @brief Wait for a notification.
  * Blocks the current task until it receives a notification.
  * 
