@@ -885,6 +885,11 @@ uint8_t task_get_weight(task_t *t) {
     return t->weight;
 }
 
+/* Get the remaining time slice of a task */
+uint32_t task_get_time_slice(task_t *t) {
+    return t->time_slice;
+}
+
 /* Get the allocated stack size of a task */
 size_t task_get_stack_size(task_t *t) {
     return t->stack_size;

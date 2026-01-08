@@ -164,6 +164,13 @@ uint16_t task_get_id(task_t *t);
 uint8_t task_get_weight(task_t *t);
 
 /**
+ * @brief Get the remaining time slice of a task.
+ * @param t Pointer to the task.
+ * @return Remaining ticks.
+ */
+uint32_t task_get_time_slice(task_t *t);
+
+/**
  * @brief Get the allocated stack size of a task.
  * @param t Pointer to the task.
  * @return Stack size in bytes.
