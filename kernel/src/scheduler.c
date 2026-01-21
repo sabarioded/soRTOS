@@ -776,8 +776,8 @@ uint32_t task_notify_wait(uint8_t clear_on_exit, uint32_t wait_ticks) {
     /* Woke up */
     stat = arch_irq_lock();
     uint32_t val = task_current->notify_val;
-    task_current->notify_state = 0;
     if (clear_on_exit) {
+        task_current->notify_state = 0;
         task_current->notify_val = 0;
     }
     /* Clear sleep tick in case we woke up early due to notification */
