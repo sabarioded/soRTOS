@@ -4,6 +4,7 @@
 #include "allocator.h"
 #include "platform.h"
 #include "arch_ops.h"
+#include "spinlock.h"
 
 /* Time Slice Configuration */
 #define BASE_SLICE_TICKS    2       /* Base ticks per weight unit */
@@ -53,6 +54,7 @@ static task_t       *zombie_list = NULL;
 static uint32_t     task_count = 0;
 static uint64_t     task_id_bitmap[BITMAP_SIZE];
 static task_t       *idle_task = NULL;
+static spinlock_t   scheduler_lock;
 
 /**
  * The heap is implemented by a tree flattened into an array.
@@ -241,7 +243,7 @@ static void _process_sleep_list(uint32_t current_ticks) {
 }
 
 /* Unblock a task (Assumes Lock Held) */
-static void _unblock_task(task_t *task) {
+static void _unblock_task_locked(task_t *task) {
     if (task->state == TASK_BLOCKED) {
         /* Remove from sleep list if it was waiting with timeout */
         if (task->sleep_until_tick > 0) {
@@ -323,6 +325,7 @@ void scheduler_init(void) {
     }
     task_list[MAX_TASKS - 1].next = NULL;
     free_list = &task_list[0];
+    spinlock_init(&scheduler_lock);
 }
 
 /* Start the scheduler */
@@ -370,7 +373,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
     size_t align_mask = (size_t)(PLATFORM_STACK_ALIGNMENT - 1);
     stack_size_bytes = (stack_size_bytes + align_mask) & ~align_mask;
 
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
 
     if (free_list == NULL) {
         /* Resource exhaustion: Try to reclaim zombie tasks immediately */
@@ -378,7 +381,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
     }
 
     if (free_list == NULL) {
-        arch_irq_unlock(stat);
+        spin_unlock(&scheduler_lock, stat);
         return -1;
     }
     task_t *new_task = free_list;
@@ -396,7 +399,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
                 
         /* Re-acquire task slot */
         if (free_list == NULL) {
-            arch_irq_unlock(stat);
+            spin_unlock(&scheduler_lock, stat);
             return -1;
         }
         new_task = free_list;
@@ -409,7 +412,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
             /* Failed again: Rollback and exit */
             new_task->next = free_list;
             free_list = new_task;
-            arch_irq_unlock(stat);
+            spin_unlock(&scheduler_lock, stat);
             return -1;
         }
     }
@@ -442,7 +445,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
         allocator_free(stack_base);
         new_task->next = free_list;
         free_list = new_task;
-        arch_irq_unlock(stat);
+        spin_unlock(&scheduler_lock, stat);
         return -1;
     }
 
@@ -468,7 +471,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
     /* Increment active task count */
     task_count++;
 
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 
     return new_task->task_id;
 }
@@ -485,7 +488,7 @@ int32_t task_delete(uint16_t task_id) {
         return 0; /* Unreachable */
     }
 
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
 
     task_t *task_to_delete = NULL;
     task_t *t = task_list;
@@ -497,7 +500,7 @@ int32_t task_delete(uint16_t task_id) {
     }
 
     if (task_to_delete == NULL || task_to_delete->is_idle) {
-        arch_irq_unlock(stat);
+        spin_unlock(&scheduler_lock, stat);
         return -1;
     }
 
@@ -521,14 +524,14 @@ int32_t task_delete(uint16_t task_id) {
     task_to_delete->next = zombie_list;
     zombie_list = task_to_delete;
 
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 
     return 0;
 }
 
 /* Task voluntarily exits */
 void task_exit(void) {
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
     
     if (task_current != NULL) {
         if (task_current->task_id > 0 && task_current->task_id <= MAX_TASKS) {
@@ -543,7 +546,7 @@ void task_exit(void) {
         zombie_list = task_current;
     }
     
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 
     /* Yield immediately to allow scheduler to switch away */
     while(1) {
@@ -553,10 +556,10 @@ void task_exit(void) {
 
 /* Called by Platform Context Switcher to pick next task */ 
 void schedule_next_task(void) {
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
 
     if (task_count == 0 && idle_task == NULL) {
-        arch_irq_unlock(stat);
+        spin_unlock(&scheduler_lock, stat);
         return;
     }
 
@@ -594,7 +597,7 @@ void schedule_next_task(void) {
         /* Found a user task */
         task_current = best;
         task_current->state = TASK_RUNNING;
-        arch_irq_unlock(stat);
+        spin_unlock(&scheduler_lock, stat);
         return;
     }
 
@@ -603,7 +606,7 @@ void schedule_next_task(void) {
         task_current = idle_task;
         task_current->state = TASK_RUNNING;
 
-        arch_irq_unlock(stat);
+        spin_unlock(&scheduler_lock, stat);
         return;
     }
 
@@ -616,12 +619,12 @@ void schedule_next_task(void) {
         platform_panic();
     }
 
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 }
 
 /* Rearrange active tasks and free zombie stacks */
 void task_garbage_collection(void) {
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
     
     while (zombie_list != NULL) {
         task_t *t = zombie_list;
@@ -642,13 +645,13 @@ void task_garbage_collection(void) {
         }
     }
 
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 }
 
 /* Check all tasks for stack overflow */
 void task_check_stack_overflow(void) {
     uint32_t current_task_overflow = 0;
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
 
     task_t *t = task_list;
     for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
@@ -671,7 +674,7 @@ void task_check_stack_overflow(void) {
         }
     }
 
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 
     if (current_task_overflow) {
         platform_panic();
@@ -684,7 +687,7 @@ void task_block(task_t *task) {
         return;
     }
 
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
     if (task->state != TASK_UNUSED && !task->is_idle) {
         /* If it was READY, remove from heap */
         if (task->state == TASK_READY) {
@@ -692,7 +695,7 @@ void task_block(task_t *task) {
         }
         task->state = TASK_BLOCKED;
     }
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 }
 
 /* Unblock a task */
@@ -701,19 +704,19 @@ void task_unblock(task_t *task) {
         return;
     }
 
-    uint32_t stat = arch_irq_lock();
-    _unblock_task(task);
-    arch_irq_unlock(stat);
+    uint32_t stat = spin_lock(&scheduler_lock);
+    _unblock_task_locked(task);
+    spin_unlock(&scheduler_lock, stat);
 }
 
 /* Block current task */
 void task_block_current(void) {
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
     if (task_current && task_current->state != TASK_UNUSED && !task_current->is_idle) {
         /* Current task is RUNNING, so it's not in the heap. Just set state. */
         task_current->state = TASK_BLOCKED;
     }
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
     
     platform_yield();
 }
@@ -725,7 +728,7 @@ int task_sleep_ticks(uint32_t ticks)
         return -1;
     }
 
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
 
     /* Remove from sleep list if already there */
     _remove_from_sleep_list(task_current);
@@ -740,7 +743,7 @@ int task_sleep_ticks(uint32_t ticks)
 
     _insert_into_sleep_list(task_current);
 
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 
     /* Yield immediately */
     platform_yield();
@@ -749,7 +752,7 @@ int task_sleep_ticks(uint32_t ticks)
 }
 
 uint32_t task_notify_wait(uint8_t clear_on_exit, uint32_t wait_ticks) {
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
     
     /* If no notification pending, block */
     if (task_current->notify_state == 0) {
@@ -762,19 +765,19 @@ uint32_t task_notify_wait(uint8_t clear_on_exit, uint32_t wait_ticks) {
             task_current->state = TASK_BLOCKED;
             /* Not in heap */
         } else {
-            arch_irq_unlock(stat);
+            spin_unlock(&scheduler_lock, stat);
             return 0;
         }
     }
     
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
     
     if (task_current->state == TASK_BLOCKED) {
         platform_yield();
     }
     
     /* Woke up */
-    stat = arch_irq_lock();
+    stat = spin_lock(&scheduler_lock);
     uint32_t val = task_current->notify_val;
     if (clear_on_exit) {
         task_current->notify_state = 0;
@@ -784,30 +787,30 @@ uint32_t task_notify_wait(uint8_t clear_on_exit, uint32_t wait_ticks) {
     if (wait_ticks > 0 && wait_ticks != UINT32_MAX) {
         task_current->sleep_until_tick = 0;
     }
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
     
     return val;
 }
 
 void task_notify(uint16_t task_id, uint32_t value) {
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
     
     task_t *t = task_list;
     for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
         if (t->state != TASK_UNUSED && t->task_id == task_id) {
             t->notify_val |= value;
             t->notify_state = 1;
-            _unblock_task(t);
+            _unblock_task_locked(t);
             break;
         }
     }
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 }
 
 /* Process System Tick (Called by ISR) */
 uint32_t scheduler_tick(void)
 {
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
     uint32_t need_reschedule = 0;
     
     uint32_t current_ticks = (uint32_t)platform_get_ticks();
@@ -832,7 +835,7 @@ uint32_t scheduler_tick(void)
         need_reschedule = 1;
     }
 
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
     return need_reschedule;
 }
 
@@ -843,7 +846,7 @@ void *task_get_current(void) {
 
 /* Change the task state. */
 void task_set_state(task_t *t, task_state_t state) {
-    uint32_t stat = arch_irq_lock();
+    uint32_t stat = spin_lock(&scheduler_lock);
 
     /* Handle Heap Management */
     if (t->state == TASK_READY && state != TASK_READY) {
@@ -876,7 +879,7 @@ void task_set_state(task_t *t, task_state_t state) {
         zombie_list = t;
     }
 
-    arch_irq_unlock(stat);
+    spin_unlock(&scheduler_lock, stat);
 }
 
 /* Atomically get the task state */
