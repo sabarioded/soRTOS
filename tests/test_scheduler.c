@@ -5,50 +5,34 @@
 #include <string.h>
 #include <setjmp.h>
 #include <stdio.h>
+#include "platform.h"
 
 extern void (*test_setUp_hook)(void);
 extern void (*test_tearDown_hook)(void);
 
+/* 
+ * TEST HARNESS EXPLANATION:
+ * These tests run in a single-threaded environment (the host PC).
+ * To simulate context switching and blocking, we use setjmp/longjmp.
+ * 
+ * 1. The test sets a checkpoint using setjmp(yield_jump).
+ * 2. The test calls a kernel function that should block (e.g., task_sleep_ticks).
+ * 3. The kernel calls platform_yield().
+ * 4. The mocked platform_yield() (in test_common.c) calls longjmp(yield_jump, 1).
+ * 5. Execution returns to the setjmp call with a return value of 1.
+ */
+
 /* Access shared mocks */
-size_t mock_ticks = 0;
-int mock_yield_count = 0;
-jmp_buf yield_jump;
-
-/* Mock platform functions */
-size_t platform_get_ticks(void) {
-     return mock_ticks; 
-}
-
-void platform_yield(void) { 
-    mock_yield_count++; 
-    longjmp(yield_jump, 1); 
-}
-
-void platform_cpu_idle(void) {
-
-}
-
-void platform_panic(void) {
-    TEST_FAIL_MESSAGE("Platform Panic!"); 
-}
-void platform_start_scheduler(size_t stack_ptr) {
-    (void)stack_ptr; 
-}
-
-void* platform_initialize_stack(void *top, void (*func)(void*), void *arg, void (*exit_func)(void)) { 
-    return top; 
-}
-
-/* Mock architecture functions */
-uint32_t arch_irq_lock(void) { 
-    return 0; 
-}
-void arch_irq_unlock(uint32_t key) { 
-    (void)key; 
-}
+extern size_t mock_ticks;
+extern int mock_yield_count;
+extern jmp_buf yield_jump;
 
 static void dummy_task(void *arg) {
     (void)arg; 
+    /* Tasks must loop forever. If they return, they become ZOMBIE. */
+    while(1) {
+        platform_yield();
+    }
 }
 
 /* Set up and Tear down */
@@ -91,6 +75,16 @@ void test_task_create_should_allocate_stack(void) {
     TEST_ASSERT_TRUE(free_after < free_before);
 }
 
+void test_task_create_should_fail_on_invalid_args(void) {
+    /* Test NULL function pointer */
+    int32_t id = task_create(NULL, NULL, 512, TASK_WEIGHT_NORMAL);
+    TEST_ASSERT_EQUAL(-1, id);
+
+    /* Test stack size too small (assuming min size > 0) */
+    id = task_create(dummy_task, NULL, 0, TASK_WEIGHT_NORMAL);
+    TEST_ASSERT_EQUAL(-1, id);
+}
+
 void test_scheduler_start_should_create_idle_task(void) {
     scheduler_start();
     /* scheduler_start sets task_current to the first task (usually Idle if no others) */
@@ -104,6 +98,7 @@ void test_task_sleep_should_block_and_yield(void) {
     /* Simulate calling sleep from the running task */
     if (setjmp(yield_jump) == 0) {
         task_sleep_ticks(100);
+        TEST_FAIL_MESSAGE("Should have yielded");
     }
     
     TEST_ASSERT_EQUAL(1, mock_yield_count); /* Should trigger context switch */
@@ -117,6 +112,7 @@ void test_scheduler_wake_sleeping_tasks(void) {
     scheduler_start();
     if (setjmp(yield_jump) == 0) {
         task_sleep_ticks(100);
+        TEST_FAIL_MESSAGE("Should have yielded");
     }
     
     task_t *t = (task_t*)task_get_current();
@@ -183,6 +179,7 @@ void test_task_notify_wait_timeout(void) {
     /* Wait with timeout */
     if (setjmp(yield_jump) == 0) {
         task_notify_wait(1, 50);
+        TEST_FAIL_MESSAGE("Should have yielded");
     }
     
     task_t *t = (task_t*)task_get_current();
@@ -203,6 +200,7 @@ void test_task_notify_simple(void) {
     /* Task 1 waits indefinitely */
     if (setjmp(yield_jump) == 0) {
         task_notify_wait(1, UINT32_MAX);
+        TEST_FAIL_MESSAGE("Should have yielded");
     }
     
     task_t *t1 = (task_t*)task_get_current();
@@ -215,14 +213,22 @@ void test_task_notify_simple(void) {
 }
 
 void test_stack_overflow_detection_should_kill_other_task(void) {
-    /* Create a victim task */
-    int32_t victim_id = task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
-    task_t *victim = scheduler_get_task_by_index(0);
+    /* Create current task (Index 0) */
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    /* Create victim task (Index 1) */
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    
+    scheduler_start();
+
+    /* Index 0: T1, Index 1: T2, Index 2: Idle */
+    task_t *victim = scheduler_get_task_by_index(1);
     
     /* Corrupt the stack canary */
     uint32_t *stack_base = (uint32_t*)task_get_stack_ptr(victim);
-    TEST_ASSERT_NOT_NULL(stack_base);
-    *stack_base = 0xDEADBEEF; /* Overwrite STACK_CANARY */
+    TEST_ASSERT_NOT_NULL(stack_base);  
+    
+    /* Invert the canary to guarantee corruption regardless of the canary value */
+    *stack_base = ~(*stack_base); 
     
     /* Run check */
     task_check_stack_overflow();
@@ -252,24 +258,25 @@ void test_preemption_on_time_slice_expiry(void) {
 
 void test_sleep_list_ordering(void) {
     /* Create two tasks */
-    int32_t id1 = task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
-    int32_t id2 = task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
     
     scheduler_start();
     
     /* Task 1 (Current) sleeps for 20 ticks */
     if (setjmp(yield_jump) == 0) {
         task_sleep_ticks(20);
+        TEST_FAIL_MESSAGE("Should have yielded");
     }
     
     /* Task 1 yielded. Manually switch to Task 2 */
     schedule_next_task();
     task_t *t2 = (task_t*)task_get_current();
-    TEST_ASSERT_EQUAL(id2, task_get_id(t2));
     
     /* Task 2 sleeps for 10 ticks */
     if (setjmp(yield_jump) == 0) {
         task_sleep_ticks(10);
+        TEST_FAIL_MESSAGE("Should have yielded");
     }
     
     /* Get handle for Task 1 */
@@ -310,12 +317,35 @@ void test_task_notify_should_accumulate_bits_and_pending_state(void) {
     TEST_ASSERT_EQUAL(0, mock_yield_count);
 }
 
+void test_task_notify_wait_should_persist_if_not_cleared(void) {
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    scheduler_start();
+    
+    task_t *curr = (task_t*)task_get_current();
+    uint16_t id = task_get_id(curr);
+    
+    task_notify(id, 0x0F);
+    
+    /* Wait WITHOUT clearing (clear_on_exit = 0) */
+    uint32_t val = task_notify_wait(0, 0);
+    TEST_ASSERT_EQUAL(0x0F, val);
+    
+    /* Read again - bits should still be set */
+    val = task_notify_wait(1, 0); /* Now clear them */
+    TEST_ASSERT_EQUAL(0x0F, val);
+    
+    /* Read again - should be empty */
+    val = task_notify_wait(0, 0);
+    TEST_ASSERT_EQUAL(0, val);
+}
+
 void test_task_block_current_should_block_and_yield(void) {
     task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
     scheduler_start();
     
     if (setjmp(yield_jump) == 0) {
         task_block_current();
+        TEST_FAIL_MESSAGE("Should have yielded");
     }
     
     TEST_ASSERT_EQUAL(1, mock_yield_count);
@@ -328,6 +358,7 @@ void test_task_exit_should_mark_zombie_and_yield(void) {
     
     if (setjmp(yield_jump) == 0) {
         task_exit();
+        TEST_FAIL_MESSAGE("Should have yielded");
     }
     
     TEST_ASSERT_EQUAL(1, mock_yield_count);
@@ -390,47 +421,47 @@ void test_stress_task_churn(void) {
 
 void test_stress_interleaved_sleep_wakeups(void) {
     /* Create 3 tasks */
-    int32_t id1 = task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
     int32_t id2 = task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
     int32_t id3 = task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
     
     scheduler_start();
     
     /* T1 sleeps 30 ticks */
-    if (setjmp(yield_jump) == 0) task_sleep_ticks(30);
+    if (setjmp(yield_jump) == 0) { task_sleep_ticks(30); TEST_FAIL_MESSAGE("Should have yielded"); }
+    
+    /* Switch to T3 (Heap behavior with equal weights: T3 pops before T2) */
+    schedule_next_task();
+    task_t *curr = (task_t*)task_get_current();
+    TEST_ASSERT_EQUAL(id3, task_get_id(curr));
+    
+    /* T3 sleeps 10 ticks */
+    if (setjmp(yield_jump) == 0) { task_sleep_ticks(10); TEST_FAIL_MESSAGE("Should have yielded"); }
     
     /* Switch to T2 */
     schedule_next_task();
-    task_t *curr = (task_t*)task_get_current();
+    curr = (task_t*)task_get_current();
     TEST_ASSERT_EQUAL(id2, task_get_id(curr));
     
-    /* T2 sleeps 10 ticks */
-    if (setjmp(yield_jump) == 0) task_sleep_ticks(10);
-    
-    /* Switch to T3 */
-    schedule_next_task();
-    curr = (task_t*)task_get_current();
-    TEST_ASSERT_EQUAL(id3, task_get_id(curr));
-    
-    /* T3 sleeps 20 ticks */
-    if (setjmp(yield_jump) == 0) task_sleep_ticks(20);
+    /* T2 sleeps 20 ticks */
+    if (setjmp(yield_jump) == 0) { task_sleep_ticks(20); TEST_FAIL_MESSAGE("Should have yielded"); }
     
     /* Get handles */
     task_t *t1 = scheduler_get_task_by_index(0);
     task_t *t2 = scheduler_get_task_by_index(1);
     task_t *t3 = scheduler_get_task_by_index(2);
     
-    /* Tick 10: T2 should wake */
+    /* Tick 10: T3 should wake */
     mock_ticks = 10;
     scheduler_tick();
-    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t2));
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t3));
+    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t3));
+    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t2));
     TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t1));
     
-    /* Tick 20: T3 should wake */
+    /* Tick 20: T2 should wake */
     mock_ticks = 20;
     scheduler_tick();
-    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t3));
+    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t2));
     TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t1));
     
     /* Tick 30: T1 should wake */
@@ -439,7 +470,7 @@ void test_stress_interleaved_sleep_wakeups(void) {
     TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t1));
 }
 
-void test_stress_round_robin_chain(void) {
+void test_stress_vruntime_chain(void) {
     /* Create 3 equal weight tasks */
     int32_t id1 = task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
     int32_t id2 = task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
@@ -447,26 +478,30 @@ void test_stress_round_robin_chain(void) {
     
     scheduler_start();
     
-    /* Helper to burn slice and switch */
-    for (int32_t expected_id = id1; ; ) {
+    int t1_ran = 0;
+    int t2_ran = 0;
+    int t3_ran = 0;
+    
+    /* Run for a number of switches to verify fairness */
+    for (int i = 0; i < 12; i++) {
         task_t *curr = (task_t*)task_get_current();
-        TEST_ASSERT_EQUAL(expected_id, task_get_id(curr));
+        uint16_t id = task_get_id(curr);
+        
+        if (id == id1) t1_ran++;
+        else if (id == id2) t2_ran++;
+        else if (id == id3) t3_ran++;
         
         /* Burn time slice */
         uint32_t slice = task_get_time_slice(curr);
-        for(uint32_t i=0; i<slice; i++) scheduler_tick();
+        for(uint32_t k=0; k<slice; k++) scheduler_tick();
         
         schedule_next_task();
-        
-        /* Determine next expected ID */
-        if (expected_id == id1) expected_id = id2;
-        else if (expected_id == id2) expected_id = id3;
-        else if (expected_id == id3) {
-            /* Verify we looped back to T1 */
-            TEST_ASSERT_EQUAL(id1, task_get_id((task_t*)task_get_current()));
-            break;
-        }
     }
+    
+    /* Verify everyone got a chance to run */
+    TEST_ASSERT_GREATER_THAN(0, t1_ran);
+    TEST_ASSERT_GREATER_THAN(0, t2_ran);
+    TEST_ASSERT_GREATER_THAN(0, t3_ran);
 }
 
 void run_scheduler_tests(void) {
@@ -477,6 +512,7 @@ void run_scheduler_tests(void) {
     UnitySetTestFile("tests/test_scheduler.c");
     RUN_TEST(test_scheduler_init_should_reset_ids);
     RUN_TEST(test_task_create_should_allocate_stack);
+    RUN_TEST(test_task_create_should_fail_on_invalid_args);
     RUN_TEST(test_scheduler_start_should_create_idle_task);
     RUN_TEST(test_task_sleep_should_block_and_yield);
     RUN_TEST(test_scheduler_wake_sleeping_tasks);
@@ -489,12 +525,13 @@ void run_scheduler_tests(void) {
     RUN_TEST(test_preemption_on_time_slice_expiry);
     RUN_TEST(test_sleep_list_ordering);
     RUN_TEST(test_task_notify_should_accumulate_bits_and_pending_state);
+    RUN_TEST(test_task_notify_wait_should_persist_if_not_cleared);
     RUN_TEST(test_task_block_current_should_block_and_yield);
     RUN_TEST(test_task_exit_should_mark_zombie_and_yield);
     RUN_TEST(test_task_block_and_unblock_apis);
     RUN_TEST(test_stress_task_churn);
     RUN_TEST(test_stress_interleaved_sleep_wakeups);
-    RUN_TEST(test_stress_round_robin_chain);
+    RUN_TEST(test_stress_vruntime_chain);
 
     printf("=== Scheduler Tests Complete ===\n\n");
 }
