@@ -301,6 +301,8 @@ static void _task_create_idle(void) {
         if(task_list[i].task_id == task_id) {
             idle_task = &task_list[i];
             idle_task->is_idle = 1;
+            /* Idle tasks should not be in the ready heap */
+            _heap_remove(idle_task);
             return;
         }
     }
@@ -333,6 +335,13 @@ void scheduler_start(void) {
     task_t *min_vrt_task = _heap_pop_min();
     
     if (min_vrt_task == NULL) {
+        /* If heap is empty, try to run idle task directly */
+        if (idle_task != NULL) {
+            task_current = idle_task;
+            task_current->state = TASK_RUNNING;
+            platform_start_scheduler((size_t)task_current->psp);
+            return; /* Should not be reached on real hardware, but needed for tests */
+        }
         platform_panic();
         return;
     }
