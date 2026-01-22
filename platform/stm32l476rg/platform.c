@@ -84,11 +84,6 @@ void platform_start_scheduler(size_t stack_pointer) {
     task_create_first();
 }
 
-/* Initialize a task's stack frame. */
-void *platform_initialize_stack(void *top_of_stack, void (*task_func)(void *), void *arg, void (*exit_handler)(void)) {
-    return arch_initialize_stack(top_of_stack, task_func, arg, exit_handler);
-}
-
 /* Trigger a context switch. */
 void platform_yield(void) {
     arch_yield();
@@ -146,4 +141,8 @@ void platform_uart_set_rx_notify(uint16_t task_id) {
 
 void platform_uart_set_rx_queue(queue_t *q) {
     uart_set_rx_queue(USART2, q);
+}
+
+void platform_uart_set_tx_queue(queue_t *q) {
+    uart_set_tx_queue(USART2, q);
 }

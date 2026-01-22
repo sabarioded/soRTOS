@@ -62,16 +62,6 @@ void platform_cpu_idle(void);
 void platform_start_scheduler(size_t stack_pointer);
 
 /**
- * @brief Initialize a task's stack frame.
- * @param top_of_stack Pointer to the top of the allocated stack.
- * @param task_func The function pointer for the task's entry point.
- * @param arg The argument to be passed to the task.
- * @param exit_handler Function to call if the task function returns.
- * @return The new stack pointer (top of stack) after initialization.
- */
-void *platform_initialize_stack(void *top_of_stack, void (*task_func)(void *), void *arg, void (*exit_handler)(void));
-
-/**
  * @brief Trigger a context switch.
  */
 void platform_yield(void);
@@ -108,5 +98,11 @@ void platform_uart_set_rx_notify(uint16_t task_id);
  * @param q Pointer to the queue.
  */
 void platform_uart_set_rx_queue(queue_t *q);
+
+/**
+ * @brief Register a queue to send outgoing UART bytes.
+ * @param q Pointer to the queue.
+ */
+void platform_uart_set_tx_queue(queue_t *q);
 
 #endif // PLATFORM_H
