@@ -64,7 +64,7 @@ static spinlock_t   scheduler_lock;
  */
 
 /* Swap two tasks in the heap and update their index tracking */
-static void _swap_tasks(uint32_t i, uint32_t j) {
+static inline void _swap_tasks(uint32_t i, uint32_t j) {
     task_t *temp = ready_heap[i];
     ready_heap[i] = ready_heap[j];
     ready_heap[j] = temp;
@@ -162,7 +162,7 @@ static void _heap_remove(task_t *t) {
 }
 
 /* Get the minimum vruntime value currently in the system */
-static uint64_t _get_min_vruntime(void) {
+static inline uint64_t _get_min_vruntime(void) {
     if (heap_size > 0) {
         return ready_heap[0]->vruntime;
     }
@@ -310,6 +310,66 @@ static void _task_create_idle(void) {
     }
 }
 
+/* Rearrange active tasks and free zombie stacks (Internal: Lock must be held) */
+static void _task_garbage_collection_locked(void) {
+    while (zombie_list != NULL) {
+        task_t *t = zombie_list;
+        zombie_list = t->next;
+        
+        /* Free the stack memory */
+        if (t->stack_ptr != NULL) {
+            allocator_free(t->stack_ptr);
+            t->stack_ptr = NULL;
+        }
+        
+        t->state = TASK_UNUSED;
+        t->next = free_list;
+        free_list = t;
+        
+        if (task_count > 0) {
+            task_count--;
+        }
+    }
+}
+
+/* Delete a task (Internal: Lock must be held) */
+static int32_t _task_delete_locked(uint16_t task_id) {
+    task_t *task_to_delete = NULL;
+    task_t *t = task_list;
+    for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
+        if (t->task_id == task_id) {
+            task_to_delete = t;
+            break;
+        }
+    }
+
+    if (task_to_delete == NULL || task_to_delete->is_idle) {
+        return -1;
+    }
+
+    /* Remove from heap if it's there */
+    _heap_remove(task_to_delete);
+    
+    /* Remove from sleep list if it's there */
+    if (task_to_delete->sleep_until_tick > 0) {
+        _remove_from_sleep_list(task_to_delete);
+    }
+
+    if (task_to_delete->task_id > 0 && task_to_delete->task_id <= MAX_TASKS) {
+        MARK_ID_FREE(task_to_delete->task_id);
+    }
+
+    /* Mark task as zombie. Its stack will be freed in garbage collection. */
+    task_to_delete->state = TASK_ZOMBIE;
+    task_to_delete->task_id = 0;
+    
+    /* Add to zombie list for GC */
+    task_to_delete->next = zombie_list;
+    zombie_list = task_to_delete;
+    
+    return 0;
+}
+
 /* Initialize the scheduler */
 void scheduler_init(void) {
     memset(task_list, 0, sizeof(task_list));
@@ -377,7 +437,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
 
     if (free_list == NULL) {
         /* Resource exhaustion: Try to reclaim zombie tasks immediately */
-        task_garbage_collection();
+        _task_garbage_collection_locked();
     }
 
     if (free_list == NULL) {
@@ -395,7 +455,7 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
         new_task->next = free_list;
         free_list = new_task;
         
-        task_garbage_collection();
+        _task_garbage_collection_locked();
                 
         /* Re-acquire task slot */
         if (free_list == NULL) {
@@ -490,43 +550,11 @@ int32_t task_delete(uint16_t task_id) {
 
     uint32_t stat = spin_lock(&scheduler_lock);
 
-    task_t *task_to_delete = NULL;
-    task_t *t = task_list;
-    for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
-        if (t->task_id == task_id) {
-            task_to_delete = t;
-            break;
-        }
-    }
-
-    if (task_to_delete == NULL || task_to_delete->is_idle) {
-        spin_unlock(&scheduler_lock, stat);
-        return -1;
-    }
-
-    /* Remove from heap if it's there */
-    _heap_remove(task_to_delete);
-    
-    /* Remove from sleep list if it's there */
-    if (task_to_delete->sleep_until_tick > 0) {
-        _remove_from_sleep_list(task_to_delete);
-    }
-
-    if (task_to_delete->task_id > 0 && task_to_delete->task_id <= MAX_TASKS) {
-        MARK_ID_FREE(task_to_delete->task_id);
-    }
-
-    /* Mark task as zombie. Its stack will be freed in garbage collection. */
-    task_to_delete->state = TASK_ZOMBIE;
-    task_to_delete->task_id = 0;
-    
-    /* Add to zombie list for GC */
-    task_to_delete->next = zombie_list;
-    zombie_list = task_to_delete;
+    int32_t res = _task_delete_locked(task_id);
 
     spin_unlock(&scheduler_lock, stat);
 
-    return 0;
+    return res;
 }
 
 /* Task voluntarily exits */
@@ -626,25 +654,8 @@ void schedule_next_task(void) {
 void task_garbage_collection(void) {
     uint32_t stat = spin_lock(&scheduler_lock);
     
-    while (zombie_list != NULL) {
-        task_t *t = zombie_list;
-        zombie_list = t->next;
-        
-        /* Free the stack memory */
-        if (t->stack_ptr != NULL) {
-            allocator_free(t->stack_ptr);
-            t->stack_ptr = NULL;
-        }
-        
-        t->state = TASK_UNUSED;
-        t->next = free_list;
-        free_list = t;
-        
-        if (task_count > 0) {
-            task_count--;
-        }
-    }
-
+    _task_garbage_collection_locked();
+    
     spin_unlock(&scheduler_lock, stat);
 }
 
@@ -667,7 +678,7 @@ void task_check_stack_overflow(void) {
                     uint16_t id_to_delete = t->task_id;
                     /* Only delete active tasks (ZOMBIEs are already dead/ID=0) */
                     if (id_to_delete != 0) {
-                        task_delete(id_to_delete);
+                        _task_delete_locked(id_to_delete);
                     }
                 }
             }
