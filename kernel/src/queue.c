@@ -4,14 +4,99 @@
 #include "arch_ops.h"
 #include "utils.h"
 #include "platform.h"
+#include "spinlock.h"
+
+typedef struct wait_node {
+    void *task;
+    struct wait_node *next;
+} wait_node_t;
+
+struct queue {
+    void *buffer;                   /* Pointer to the allocated data storage */
+    size_t item_size;               /* Size of a single item in bytes */
+    size_t capacity;                /* Maximum number of items the queue can hold */
+    size_t count;                   /* Current number of items in the queue */
+    size_t head;                    /* Read index (where to take next) */
+    size_t tail;                    /* Write index (where to put next) */
+    
+    /* Wait queues */
+    wait_node_t *rx_wait_head;      /* Head of RX wait list */
+    wait_node_t *rx_wait_tail;      /* Tail of RX wait list */
+    
+    wait_node_t *tx_wait_head;      /* Head of TX wait list */
+    wait_node_t *tx_wait_tail;      /* Tail of TX wait list */
+
+    /* Notification Callback */
+    queue_notify_cb_t callback;      /* Function to call when data is added */
+    void *callback_arg;              /* Argument for the callback */
+
+    spinlock_t lock;                 /* Queue-specific lock */
+};
+
+/* Add task to wait list */
+static void _add_to_wait_list(wait_node_t **head, wait_node_t **tail, wait_node_t *node) {
+    node->next = NULL;
+    
+    if (*tail) {
+        (*tail)->next = node;
+    } else {
+        *head = node;
+    }
+    *tail = node;
+}
+
+/* Remove and return first task from wait list */
+static void* _pop_from_wait_list(wait_node_t **head, wait_node_t **tail) {
+    if (!*head) {
+        return NULL;
+    }
+    
+    wait_node_t *node = *head;
+    void *task = node->task;
+    
+    *head = node->next;
+    if (*head == NULL) {
+        *tail = NULL;
+    }
+    
+    return task;
+}
+
+/* Remove specific task from wait list */
+static void _remove_task_from_list(wait_node_t **head, wait_node_t **tail, void *task) {
+    wait_node_t *curr = *head;
+    wait_node_t *prev = NULL;
+    
+    while (curr) {
+        if (curr->task == task) {
+            if (prev) {
+                prev->next = curr->next;
+            } else {
+                *head = curr->next;
+            }
+            
+            if (curr == *tail) {
+                *tail = prev;
+            }
+            
+            return;
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+}
 
 /* Create a queue: allocate struct and buffer */
 queue_t* queue_create(size_t item_size, size_t capacity) {
-    if (item_size == 0 || capacity == 0) return NULL;
+    if (item_size == 0 || capacity == 0){
+        return NULL;
+    }
 
     /* Allocate queue control block */
     queue_t *q = (queue_t*)allocator_malloc(sizeof(queue_t));
-    if (!q) return NULL;
+    if (!q) {
+        return NULL;
+    }
 
     /* Allocate data buffer */
     q->buffer = allocator_malloc(item_size * capacity);
@@ -27,29 +112,50 @@ queue_t* queue_create(size_t item_size, size_t capacity) {
     q->tail = 0;
 
     /* Initialize wait queues for blocking tasks */
-    q->rx_head = q->rx_tail = q->rx_count = 0;
-    q->tx_head = q->tx_tail = q->tx_count = 0;
-    for(int i=0; i<MAX_TASKS; i++) {
-        q->rx_wait_queue[i] = NULL;
-        q->tx_wait_queue[i] = NULL;
-    }
+    q->rx_wait_head = NULL;
+    q->rx_wait_tail = NULL;
+    
+    q->tx_wait_head = NULL;
+    q->tx_wait_tail = NULL;
 
+    q->callback = NULL;
+    q->callback_arg = NULL;
+
+    spinlock_init(&q->lock);
     return q;
 }
 
-/* Delete queue: free buffer and struct */
+/* Delete queue, free buffer and struct */
 void queue_delete(queue_t *q) {
-    if (!q) return;
-    if (q->buffer) allocator_free(q->buffer);
+    if (!q) {
+        return;
+    }
+    
+    /* Free any remaining wait nodes */
+    while (q->rx_wait_head) {
+        _pop_from_wait_list(&q->rx_wait_head, &q->rx_wait_tail);
+    }
+    while (q->tx_wait_head) {
+        _pop_from_wait_list(&q->tx_wait_head, &q->tx_wait_tail);
+    }
+
+    if (q->buffer) {
+        allocator_free(q->buffer);
+    }
     allocator_free(q);
 }
 
-/* Send item to queue. Block if full. */
+/* Send item to queue. block if full. */
 int queue_send(queue_t *q, const void *item) {
-    if (!q || !item) return -1;
+    if (!q || !item) {
+        return -1;
+    }
+    
+    wait_node_t node;
+    node.task = task_get_current();
 
     while (1) {
-        uint32_t flags = arch_irq_lock();
+        uint32_t flags = spin_lock(&q->lock);
 
         /* Check if there is space */
         if (q->count < q->capacity) {
@@ -60,42 +166,52 @@ int queue_send(queue_t *q, const void *item) {
             q->count++;
 
             /* If a task is waiting to receive, wake it up */
-            if (q->rx_count > 0) {
-                void *task = q->rx_wait_queue[q->rx_head];
-                q->rx_head = (q->rx_head + 1) % MAX_TASKS;
-                q->rx_count--;
+            void *task = _pop_from_wait_list(&q->rx_wait_head, &q->rx_wait_tail);
+            if (task) {
                 task_unblock((task_t*)task);
             }
 
-            arch_irq_unlock(flags);
+            /* Notify callback if registered */
+            if (q->callback) {
+                q->callback(q->callback_arg);
+            }
+
+            spin_unlock(&q->lock, flags);
             return 0;
         }
 
-        /* Queue is full: Add current task to TX wait queue and block */
-        if (q->tx_count < MAX_TASKS) {
-            q->tx_wait_queue[q->tx_tail] = task_get_current();
-            q->tx_tail = (q->tx_tail + 1) % MAX_TASKS;
-            q->tx_count++;
-            /* Mark as blocked, but yield AFTER unlocking to allow context switch */
-            task_set_state((task_t*)task_get_current(), TASK_BLOCKED);
-        } else {
-            /* Wait queue is full, cannot block */
-            arch_irq_unlock(flags);
-            return -1; /* Wait queue full */
-        }
+        /* Queue is full, add current task to TX wait queue and block */
+        
+        /* Ensure we aren't already in the list */
+        _remove_task_from_list(&q->tx_wait_head, &q->tx_wait_tail, node.task);
+        
+        _add_to_wait_list(&q->tx_wait_head, &q->tx_wait_tail, &node);
+        
+        task_set_state((task_t*)node.task, TASK_BLOCKED);
 
-        arch_irq_unlock(flags);
+        spin_unlock(&q->lock, flags);
         /* Yield CPU to allow other tasks to run (and hopefully consume data) */
         platform_yield();
+        
+        /** 
+         * Loop restarts. 
+         * If we woke up spuriously, we remove ourselves at start of next loop 
+         * or via _remove_task_from_list above 
+         */
     }
 }
 
 /* Receive item from queue. Block if empty. */
 int queue_receive(queue_t *q, void *buffer) {
-    if (!q || !buffer) return -1;
+    if (!q || !buffer) {
+        return -1;
+    }
+
+    wait_node_t node;
+    node.task = task_get_current();
 
     while (1) {
-        uint32_t flags = arch_irq_lock();
+        uint32_t flags = spin_lock(&q->lock);
 
         /* Check if there is data */
         if (q->count > 0) {
@@ -106,38 +222,34 @@ int queue_receive(queue_t *q, void *buffer) {
             q->count--;
 
             /* If a task is waiting to send, wake it up */
-            if (q->tx_count > 0) {
-                void *task = q->tx_wait_queue[q->tx_head];
-                q->tx_head = (q->tx_head + 1) % MAX_TASKS;
-                q->tx_count--;
+            void *task = _pop_from_wait_list(&q->tx_wait_head, &q->tx_wait_tail);
+            if (task) {
                 task_unblock((task_t*)task);
             }
 
-            arch_irq_unlock(flags);
+            spin_unlock(&q->lock, flags);
             return 0;
         }
 
-        /* Queue is empty: Add current task to RX wait queue and block */
-        if (q->rx_count < MAX_TASKS) {
-            q->rx_wait_queue[q->rx_tail] = task_get_current();
-            q->rx_tail = (q->rx_tail + 1) % MAX_TASKS;
-            q->rx_count++;
-            task_set_state((task_t*)task_get_current(), TASK_BLOCKED);
-        } else {
-            arch_irq_unlock(flags);
-            return -1;
-        }
+        /* Queue is empty, add current task to RX wait queue and block */
+        _remove_task_from_list(&q->rx_wait_head, &q->rx_wait_tail, node.task);
 
-        arch_irq_unlock(flags);
+        _add_to_wait_list(&q->rx_wait_head, &q->rx_wait_tail, &node);
+        
+        task_set_state((task_t*)node.task, TASK_BLOCKED);
+
+        spin_unlock(&q->lock, flags);
         platform_yield();
     }
 }
 
 /* Send item from ISR. Non-blocking. */
 int queue_send_from_isr(queue_t *q, const void *item) {
-    if (!q || !item) return -1;
+    if (!q || !item) {
+        return -1;
+    }
 
-    uint32_t flags = arch_irq_lock();
+    uint32_t flags = spin_lock(&q->lock);
 
     /* Check space immediately */
     if (q->count < q->capacity) {
@@ -148,57 +260,103 @@ int queue_send_from_isr(queue_t *q, const void *item) {
         q->count++;
 
         /* Wake up a waiting receiver if any */
-        if (q->rx_count > 0) {
-            void *task = q->rx_wait_queue[q->rx_head];
-            q->rx_head = (q->rx_head + 1) % MAX_TASKS;
-            q->rx_count--;
+        void *task = _pop_from_wait_list(&q->rx_wait_head, &q->rx_wait_tail);
+        if (task) {
             task_unblock((task_t*)task);
         }
 
-        arch_irq_unlock(flags);
+        /* Notify callback if registered */
+        if (q->callback) {
+            q->callback(q->callback_arg);
+        }
+
+        spin_unlock(&q->lock, flags);
         return 0;
     }
 
-    arch_irq_unlock(flags);
+    spin_unlock(&q->lock, flags);
     return -1; /* Queue full */
+}
+
+/* Receive item from ISR. Non-blocking. */
+int queue_receive_from_isr(queue_t *q, void *buffer) {
+    if (!q || !buffer) {
+        return -1;
+    }
+
+    uint32_t flags = spin_lock(&q->lock);
+
+    if (q->count > 0) {
+        /* Copy data from the circular buffer */
+        uint8_t *source = (uint8_t*)q->buffer + (q->head * q->item_size);
+        memcpy(buffer, source, q->item_size);
+        q->head = (q->head + 1) % q->capacity;
+        q->count--;
+
+        /* If a task is waiting to send, wake it up */
+        void *task = _pop_from_wait_list(&q->tx_wait_head, &q->tx_wait_tail);
+        if (task) {
+            task_unblock((task_t*)task);
+        }
+
+        spin_unlock(&q->lock, flags);
+        return 0;
+    }
+
+    spin_unlock(&q->lock, flags);
+    return -1;
 }
 
 /* Peek at the next item without removing it. Non-blocking. */
 int queue_peek(queue_t *q, void *buffer) {
-    if (!q || !buffer) return -1;
+    if (!q || !buffer) {
+        return -1;
+    }
 
-    uint32_t flags = arch_irq_lock();
+    uint32_t flags = spin_lock(&q->lock);
 
     if (q->count > 0) {
         /* Copy data from the circular buffer */
         uint8_t *source = (uint8_t*)q->buffer + (q->head * q->item_size);
         memcpy(buffer, source, q->item_size);
         
-        arch_irq_unlock(flags);
+        spin_unlock(&q->lock, flags);
         return 0;
     }
 
-    arch_irq_unlock(flags);
+    spin_unlock(&q->lock, flags);
     return -1;
 }
 
 /* Reset queue: clear data and wake writers */
 void queue_reset(queue_t *q) {
-    if (!q) return;
+    if (!q) {
+        return;
+    }
 
-    uint32_t flags = arch_irq_lock();
+    uint32_t flags = spin_lock(&q->lock);
 
     q->head = 0;
     q->tail = 0;
     q->count = 0;
 
     /* Wake up all tasks waiting to send, as the queue is now empty */
-    while(q->tx_count > 0) {
-        void *task = q->tx_wait_queue[q->tx_head];
-        q->tx_head = (q->tx_head + 1) % MAX_TASKS;
-        q->tx_count--;
+    while (1) {
+        void *task = _pop_from_wait_list(&q->tx_wait_head, &q->tx_wait_tail);
+        if (!task) break;
         task_unblock((task_t*)task);
     }
 
-    arch_irq_unlock(flags);
+    spin_unlock(&q->lock, flags);
+}
+
+/* Register a push callback */
+void queue_set_push_callback(queue_t *q, queue_notify_cb_t cb, void *arg) {
+    if (!q || !cb) {
+        return;
+    }
+    uint32_t flags = spin_lock(&q->lock);
+    q->callback = cb;
+    q->callback_arg = arg;
+    spin_unlock(&q->lock, flags);
 }
