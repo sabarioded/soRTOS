@@ -484,8 +484,8 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
     new_task->stack_ptr     = stack_base;     /* Save base for free */
     new_task->stack_size    = stack_size_bytes;
     
-    /* Initialize Task Context (Platform Specific) */
-    new_task->psp = platform_initialize_stack(stack_end, task_func, arg, task_exit);
+    /* Initialize Task Context (Architecture Specific) */
+    new_task->psp = arch_initialize_stack(stack_end, task_func, arg, task_exit);
     
     new_task->state = TASK_READY;
     new_task->is_idle = 0;
