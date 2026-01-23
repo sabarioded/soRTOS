@@ -20,7 +20,7 @@ typedef struct heap_stats {
  * @param pool Pointer to the raw memory buffer to be managed.
  * @param size Total size of the raw buffer in bytes.
  */
-void  allocator_init(uint8_t* pool, size_t size);
+void allocator_init(uint8_t* pool, size_t size);
 
 /**
  * @brief Allocates a block of memory from the pool.
@@ -72,7 +72,7 @@ int allocator_get_stats(heap_stats_t *stats);
 /**
  * @brief Verify the integrity of the heap.
  * 
- * @return 0 on success, -1 if heap not initialized or theres an issue. 
+ * @return 0 on success, or a negative error code indicating the type of corruption.
  */
 int allocator_check_integrity(void);
 
