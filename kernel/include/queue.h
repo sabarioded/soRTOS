@@ -5,31 +5,10 @@
 #include <stddef.h>
 #include "project_config.h"
 
-/**
- * @brief Thread-safe Message Queue Structure.
- * 
- * Used for inter-task communication and synchronization.
- * Supports blocking send/receive operations and ISR-safe sending.
- */
-typedef struct {
-    void *buffer;           /**< Pointer to the allocated data storage */
-    size_t item_size;       /**< Size of a single item in bytes */
-    size_t capacity;        /**< Maximum number of items the queue can hold */
-    size_t count;           /**< Current number of items in the queue */
-    size_t head;            /**< Read index (where to take next) */
-    size_t tail;            /**< Write index (where to put next) */
-    
-    /* Wait queues */
-    void *rx_wait_queue[MAX_TASKS]; /**< List of tasks waiting to receive data */
-    uint8_t rx_head;                /**< Head of RX wait queue */
-    uint8_t rx_tail;                /**< Tail of RX wait queue */
-    uint8_t rx_count;               /**< Number of tasks waiting to receive */
-    
-    void *tx_wait_queue[MAX_TASKS]; /**< List of tasks waiting to send data */
-    uint8_t tx_head;                /**< Head of TX wait queue */
-    uint8_t tx_tail;                /**< Tail of TX wait queue */
-    uint8_t tx_count;               /**< Number of tasks waiting to send */
-} queue_t;
+typedef struct queue queue_t;
+
+/* Callback function type for queue events */
+typedef void (*queue_notify_cb_t)(void *arg);
 
 /**
  * @brief Create a new message queue.
@@ -89,6 +68,18 @@ int queue_receive(queue_t *q, void *buffer);
 int queue_send_from_isr(queue_t *q, const void *item);
 
 /**
+ * @brief Receive an item from the queue from an Interrupt Service Routine (Non-Blocking).
+ * 
+ * Copies an item from the queue into the provided buffer. If the queue is empty,
+ * returns immediately with an error. Does NOT block.
+ * 
+ * @param q Pointer to the queue.
+ * @param buffer Pointer to the memory where the received item will be copied.
+ * @return 0 on success, -1 if queue is empty or invalid.
+ */
+int queue_receive_from_isr(queue_t *q, void *buffer);
+
+/**
  * @brief Peek at the item at the head of the queue without removing it.
  * 
  * Copies the item at the head of the queue into the provided buffer.
@@ -109,5 +100,14 @@ int queue_peek(queue_t *q, void *buffer);
  * @param q Pointer to the queue.
  */
 void queue_reset(queue_t *q);
+
+/**
+ * @brief Register a callback to be called when data is pushed to the queue.
+ * 
+ * @param q Pointer to the queue.
+ * @param cb Function to call.
+ * @param arg Argument to pass to the function.
+ */
+void queue_set_push_callback(queue_t *q, queue_notify_cb_t cb, void *arg);
 
 #endif /* QUEUE_H */
