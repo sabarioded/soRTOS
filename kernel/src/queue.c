@@ -86,7 +86,7 @@ static void _remove_task_from_list(wait_node_t **head, wait_node_t **tail, void 
     }
 }
 
-/* Create a queue: allocate struct and buffer */
+/* Create a queue, allocate struct and buffer */
 queue_t* queue_create(size_t item_size, size_t capacity) {
     if (item_size == 0 || capacity == 0){
         return NULL;
@@ -192,12 +192,6 @@ int queue_send(queue_t *q, const void *item) {
         spin_unlock(&q->lock, flags);
         /* Yield CPU to allow other tasks to run (and hopefully consume data) */
         platform_yield();
-        
-        /** 
-         * Loop restarts. 
-         * If we woke up spuriously, we remove ourselves at start of next loop 
-         * or via _remove_task_from_list above 
-         */
     }
 }
 
