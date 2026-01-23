@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "queue.h"
+#include "platform_config.h"
 
 /**
  * @brief Stack alignment requirement in bytes.
