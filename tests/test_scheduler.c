@@ -533,5 +533,5 @@ void run_scheduler_tests(void) {
     RUN_TEST(test_stress_interleaved_sleep_wakeups);
     RUN_TEST(test_stress_vruntime_chain);
 
-    printf("=== Scheduler Tests Complete ===\n\n");
+    printf("=== Scheduler Tests Complete ===\n");
 }
