@@ -56,6 +56,13 @@
 #define SL_INDEX_COUNT_LOG2     5
 
 /* ============================================================================
+   Logger Configuration
+   ============================================================================ */
+#define LOG_ENABLE              1      /* 1 to enable, 0 to remove code */
+#define LOG_QUEUE_SIZE          64     /* Number of log entries to buffer */
+#define LOG_HISTORY_SIZE        128    /* Number of entries to keep in RAM history */
+
+/* ============================================================================
    Compile-Time Validation
    ============================================================================ */
 
