@@ -5,6 +5,7 @@
 #include "platform.h"
 #include <setjmp.h>
 #include "spinlock.h"
+#include <stdio.h>
 
 /* 
  * We redefine the internal queue structure here to access private members.
@@ -186,7 +187,7 @@ void run_queue_tests(void) {
     test_setUp_hook = setUp_queue;
     test_tearDown_hook = tearDown_queue;
 
-    printf("##########  Start of Queue tests: ##########\n");
+    printf("\n=== Starting Queue Tests ===\n");
     RUN_TEST(test_queue_creation);
     RUN_TEST(test_queue_send_receive);
     RUN_TEST(test_queue_full);
@@ -196,5 +197,5 @@ void run_queue_tests(void) {
     RUN_TEST(test_queue_receive_blocking);
     RUN_TEST(test_queue_callback);
     RUN_TEST(test_queue_reset);
-    printf("########## End of Queue tests. ##########\n");
+    printf("=== Queue Tests Complete ===\n");
 }
