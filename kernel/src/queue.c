@@ -165,7 +165,7 @@ int queue_send(queue_t *q, const void *item) {
         if (q->count < q->capacity) {
             /* Copy data to the circular buffer */
             uint8_t *target = (uint8_t*)q->buffer + (q->tail * q->item_size);
-            memcpy(target, item, q->item_size);
+            utils_memcpy(target, item, q->item_size);
             q->tail = (q->tail + 1) % q->capacity;
             q->count++;
 
@@ -215,7 +215,7 @@ int queue_receive(queue_t *q, void *buffer) {
         if (q->count > 0) {
             /* Copy data from the circular buffer */
             uint8_t *source = (uint8_t*)q->buffer + (q->head * q->item_size);
-            memcpy(buffer, source, q->item_size);
+            utils_memcpy(buffer, source, q->item_size);
             q->head = (q->head + 1) % q->capacity;
             q->count--;
 
@@ -253,7 +253,7 @@ int queue_send_from_isr(queue_t *q, const void *item) {
     if (q->count < q->capacity) {
         /* Copy data */
         uint8_t *target = (uint8_t*)q->buffer + (q->tail * q->item_size);
-        memcpy(target, item, q->item_size);
+        utils_memcpy(target, item, q->item_size);
         q->tail = (q->tail + 1) % q->capacity;
         q->count++;
 
@@ -287,7 +287,7 @@ int queue_receive_from_isr(queue_t *q, void *buffer) {
     if (q->count > 0) {
         /* Copy data from the circular buffer */
         uint8_t *source = (uint8_t*)q->buffer + (q->head * q->item_size);
-        memcpy(buffer, source, q->item_size);
+        utils_memcpy(buffer, source, q->item_size);
         q->head = (q->head + 1) % q->capacity;
         q->count--;
 
@@ -316,7 +316,7 @@ int queue_peek(queue_t *q, void *buffer) {
     if (q->count > 0) {
         /* Copy data from the circular buffer */
         uint8_t *source = (uint8_t*)q->buffer + (q->head * q->item_size);
-        memcpy(buffer, source, q->item_size);
+        utils_memcpy(buffer, source, q->item_size);
         
         spin_unlock(&q->lock, flags);
         return 0;

@@ -373,10 +373,10 @@ static int32_t _task_delete_locked(uint16_t task_id) {
 
 /* Initialize the scheduler */
 void scheduler_init(void) {
-    memset(task_list, 0, sizeof(task_list));
+    utils_memset(task_list, 0, sizeof(task_list));
     task_current = NULL;
     task_count = 0;
-    memset(task_id_bitmap, 0, sizeof(task_id_bitmap));
+    utils_memset(task_id_bitmap, 0, sizeof(task_id_bitmap));
     idle_task = NULL;
     heap_size = 0;
 

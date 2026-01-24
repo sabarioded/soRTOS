@@ -47,7 +47,7 @@ static void logger_task_entry(void *arg) {
 
 /* CLI Command Handler: log [dump|live|clear] */
 static int cmd_log_handler(int argc, char **argv) {
-    if (argc < 2 || strcmp(argv[1], "dump") == 0) {
+    if (argc < 2 || utils_strcmp(argv[1], "dump") == 0) {
         /* Dump the history buffer */
         cli_printf("--- Log History (%u entries) ---\r\n", log_count);
         
@@ -70,16 +70,16 @@ static int cmd_log_handler(int argc, char **argv) {
         return 0;
     }
     
-    if (strcmp(argv[1], "live") == 0) {
+    if (utils_strcmp(argv[1], "live") == 0) {
         if (argc >= 3) {
-            if (strcmp(argv[2], "on") == 0) log_live = 1;
-            else if (strcmp(argv[2], "off") == 0) log_live = 0;
+            if (utils_strcmp(argv[2], "on") == 0) log_live = 1;
+            else if (utils_strcmp(argv[2], "off") == 0) log_live = 0;
         }
         cli_printf("Live Logging: %s\r\n", log_live ? "ON" : "OFF");
         return 0;
     }
 
-    if (strcmp(argv[1], "clear") == 0) {
+    if (utils_strcmp(argv[1], "clear") == 0) {
         log_count = 0;
         log_head = 0;
         cli_printf("Log cleared.\r\n");
