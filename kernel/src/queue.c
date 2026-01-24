@@ -149,8 +149,8 @@ void queue_delete(queue_t *q) {
     allocator_free(q);
 }
 
-/* Send item to queue. block if full. */
-int queue_send(queue_t *q, const void *item) {
+/* Push item to queue. block if full. */
+int queue_push(queue_t *q, const void *item) {
     if (!q || !item) {
         return -1;
     }
@@ -199,8 +199,70 @@ int queue_send(queue_t *q, const void *item) {
     }
 }
 
-/* Receive item from queue. Block if empty. */
-int queue_receive(queue_t *q, void *buffer) {
+/* Push multiple items to queue. Block if full. */
+int queue_push_arr(queue_t *q, const void *data, size_t count) {
+    if (!q || !data) {
+        return -1;
+    }
+    
+    const uint8_t *ptr = (const uint8_t*)data;
+    size_t remaining = count;
+    wait_node_t node;
+    node.task = task_get_current();
+
+    while (remaining > 0) {
+        uint32_t flags = spin_lock(&q->lock);
+
+        /* If queue is full, block */
+        if (q->count == q->capacity) {
+            _remove_task_from_list(&q->tx_wait_head, &q->tx_wait_tail, node.task);
+            _add_to_wait_list(&q->tx_wait_head, &q->tx_wait_tail, &node);
+            task_set_state((task_t*)node.task, TASK_BLOCKED);
+            
+            spin_unlock(&q->lock, flags);
+            platform_yield();
+            continue; /* Retry */
+        }
+
+        /* Calculate how much we can write in this chunk */
+        size_t space = q->capacity - q->count;
+        size_t chunk = (remaining < space) ? remaining : space;
+
+        /* Perform write (handling circular wrap) */
+        size_t tail = q->tail;
+        size_t end = q->capacity;
+        size_t first_part = end - tail;
+
+        if (chunk <= first_part) {
+            utils_memcpy((uint8_t*)q->buffer + tail * q->item_size, ptr, chunk * q->item_size);
+            q->tail = (tail + chunk) % end;
+        } else {
+            utils_memcpy((uint8_t*)q->buffer + tail * q->item_size, ptr, first_part * q->item_size);
+            utils_memcpy((uint8_t*)q->buffer, ptr + first_part * q->item_size, (chunk - first_part) * q->item_size);
+            q->tail = chunk - first_part;
+        }
+
+        q->count += chunk;
+        ptr += chunk * q->item_size;
+        remaining -= chunk;
+
+        /* Wake up receivers (one for each item written, up to chunk size) */
+        size_t woken = 0;
+        while (woken < chunk && q->rx_wait_head) {
+             void *task = _pop_from_wait_list(&q->rx_wait_head, &q->rx_wait_tail);
+             if (task) task_unblock((task_t*)task);
+             woken++;
+        }
+
+        if (q->callback) q->callback(q->callback_arg);
+
+        spin_unlock(&q->lock, flags);
+    }
+    return 0;
+}
+
+/* Pop item from queue. Block if empty. */
+int queue_pop(queue_t *q, void *buffer) {
     if (!q || !buffer) {
         return -1;
     }
@@ -241,8 +303,8 @@ int queue_receive(queue_t *q, void *buffer) {
     }
 }
 
-/* Send item from ISR. Non-blocking. */
-int queue_send_from_isr(queue_t *q, const void *item) {
+/* Push item from ISR. Non-blocking. */
+int queue_push_from_isr(queue_t *q, const void *item) {
     if (!q || !item) {
         return -1;
     }
@@ -276,8 +338,8 @@ int queue_send_from_isr(queue_t *q, const void *item) {
     return -1; /* Queue full */
 }
 
-/* Receive item from ISR. Non-blocking. */
-int queue_receive_from_isr(queue_t *q, void *buffer) {
+/* Pop item from ISR. Non-blocking. */
+int queue_pop_from_isr(queue_t *q, void *buffer) {
     if (!q || !buffer) {
         return -1;
     }

@@ -20,7 +20,7 @@ static void setUp_local(void) {
     queue_t *q = logger_get_queue();
     if (q) {
         log_entry_t dummy;
-        while(queue_receive_from_isr(q, &dummy) == 0);
+        while(queue_pop_from_isr(q, &dummy) == 0);
     }
 }
 
@@ -50,7 +50,7 @@ void test_logger_log_pushes_to_queue(void) {
     
     /* Verify queue has 1 item */
     log_entry_t entry;
-    TEST_ASSERT_EQUAL(0, queue_receive_from_isr(q, &entry));
+    TEST_ASSERT_EQUAL(0, queue_pop_from_isr(q, &entry));
     
     TEST_ASSERT_EQUAL(1234, entry.timestamp);
     TEST_ASSERT_EQUAL_STRING(msg, entry.fmt);
@@ -67,11 +67,11 @@ void test_logger_log_fifo_order(void) {
     log_entry_t entry;
     
     /* Pop First */
-    TEST_ASSERT_EQUAL(0, queue_receive_from_isr(q, &entry));
+    TEST_ASSERT_EQUAL(0, queue_pop_from_isr(q, &entry));
     TEST_ASSERT_EQUAL_STRING("First", entry.fmt);
     
     /* Pop Second */
-    TEST_ASSERT_EQUAL(0, queue_receive_from_isr(q, &entry));
+    TEST_ASSERT_EQUAL(0, queue_pop_from_isr(q, &entry));
     TEST_ASSERT_EQUAL_STRING("Second", entry.fmt);
 }
 
@@ -93,7 +93,7 @@ void test_logger_log_drops_when_full_non_blocking(void) {
      */
        
     log_entry_t entry;
-    TEST_ASSERT_EQUAL(0, queue_receive_from_isr(q, &entry));
+    TEST_ASSERT_EQUAL(0, queue_pop_from_isr(q, &entry));
     TEST_ASSERT_EQUAL_STRING("Fill", entry.fmt);
     TEST_ASSERT_EQUAL(0, entry.arg1);
 }

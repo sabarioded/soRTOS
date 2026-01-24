@@ -83,11 +83,11 @@ void test_queue_send_receive(void) {
     int rx_val = 0;
 
     /* Send should succeed */
-    int res = queue_send_from_isr(q, &tx_val);
+    int res = queue_push_from_isr(q, &tx_val);
     TEST_ASSERT_EQUAL(0, res);
 
     /* Receive should succeed */
-    res = queue_receive_from_isr(q, &rx_val);
+    res = queue_pop_from_isr(q, &rx_val);
     TEST_ASSERT_EQUAL(0, res);
     TEST_ASSERT_EQUAL(42, rx_val);
 }
@@ -96,31 +96,31 @@ void test_queue_full(void) {
     int val = 10;
     /* Fill the queue */
     for (int i = 0; i < 5; i++) {
-        TEST_ASSERT_EQUAL(0, queue_send_from_isr(q, &val));
+        TEST_ASSERT_EQUAL(0, queue_push_from_isr(q, &val));
     }
 
     /* Next send should fail (using ISR version to avoid blocking loop in test) */
-    TEST_ASSERT_EQUAL(-1, queue_send_from_isr(q, &val));
+    TEST_ASSERT_EQUAL(-1, queue_push_from_isr(q, &val));
 }
 
 void test_queue_empty(void) {
     int val;
     /* Receive from empty queue should fail */
-    TEST_ASSERT_EQUAL(-1, queue_receive_from_isr(q, &val));
+    TEST_ASSERT_EQUAL(-1, queue_pop_from_isr(q, &val));
 }
 
 void test_queue_peek(void) {
     int tx_val = 99;
     int rx_val = 0;
 
-    queue_send_from_isr(q, &tx_val);
+    queue_push_from_isr(q, &tx_val);
 
     /* Peek should get value but not remove it */
     TEST_ASSERT_EQUAL(0, queue_peek(q, &rx_val));
     TEST_ASSERT_EQUAL(99, rx_val);
 
     /* Receive should still get it */
-    TEST_ASSERT_EQUAL(0, queue_receive_from_isr(q, &rx_val));
+    TEST_ASSERT_EQUAL(0, queue_pop_from_isr(q, &rx_val));
     TEST_ASSERT_EQUAL(99, rx_val);
 }
 
@@ -128,12 +128,12 @@ void test_queue_send_blocking(void) {
     int val = 10;
     /* Fill the queue */
     for (int i = 0; i < 5; i++) {
-        queue_send_from_isr(q, &val);
+        queue_push_from_isr(q, &val);
     }
 
     /* Next send should block */
     if (setjmp(yield_jump) == 0) {
-        queue_send(q, &val);
+        queue_push(q, &val);
         TEST_FAIL_MESSAGE("Should have yielded");
     }
     TEST_ASSERT_EQUAL(1, mock_yield_count);
@@ -144,7 +144,7 @@ void test_queue_receive_blocking(void) {
     int val;
     /* Receive from empty queue should block */
     if (setjmp(yield_jump) == 0) {
-        queue_receive(q, &val);
+        queue_pop(q, &val);
         TEST_FAIL_MESSAGE("Should have yielded");
     }
     TEST_ASSERT_EQUAL(1, mock_yield_count);
@@ -162,20 +162,37 @@ void test_queue_callback(void) {
     queue_set_push_callback(q, my_queue_cb, NULL);
     
     int val = 1;
-    queue_send_from_isr(q, &val);
+    queue_push_from_isr(q, &val);
     TEST_ASSERT_EQUAL(1, cb_count);
 }
 
 void test_queue_reset(void) {
     int val = 10;
     for (int i = 0; i < 5; i++) {
-        queue_send_from_isr(q, &val);
+        queue_push_from_isr(q, &val);
     }
     
     queue_reset(q);
     
     /* Should be empty now */
-    TEST_ASSERT_EQUAL(-1, queue_receive_from_isr(q, &val));
+    TEST_ASSERT_EQUAL(-1, queue_pop_from_isr(q, &val));
+}
+
+void test_queue_push_arr(void) {
+    int vals[] = {100, 200, 300};
+    
+    /* Push array of 3 items */
+    TEST_ASSERT_EQUAL(0, queue_push_arr(q, vals, 3));
+    
+    int rx_val;
+    TEST_ASSERT_EQUAL(0, queue_pop(q, &rx_val));
+    TEST_ASSERT_EQUAL(100, rx_val);
+    
+    TEST_ASSERT_EQUAL(0, queue_pop(q, &rx_val));
+    TEST_ASSERT_EQUAL(200, rx_val);
+    
+    TEST_ASSERT_EQUAL(0, queue_pop(q, &rx_val));
+    TEST_ASSERT_EQUAL(300, rx_val);
 }
 
 void run_queue_tests(void) {
@@ -193,5 +210,6 @@ void run_queue_tests(void) {
     RUN_TEST(test_queue_receive_blocking);
     RUN_TEST(test_queue_callback);
     RUN_TEST(test_queue_reset);
+    RUN_TEST(test_queue_push_arr);
     printf("=== Queue Tests Complete ===\n");
 }

@@ -32,7 +32,7 @@ queue_t* queue_create(size_t item_size, size_t capacity);
 void queue_delete(queue_t *q);
 
 /**
- * @brief Send an item to the queue (Blocking).
+ * @brief Push an item to the queue (Blocking).
  * 
  * Copies the item into the queue. If the queue is full, the calling task
  * blocks until space becomes available.
@@ -41,10 +41,23 @@ void queue_delete(queue_t *q);
  * @param item Pointer to the data to copy into the queue.
  * @return 0 on success, -1 on error (e.g. invalid queue).
  */
-int queue_send(queue_t *q, const void *item);
+int queue_push(queue_t *q, const void *item);
 
 /**
- * @brief Receive an item from the queue (Blocking).
+ * @brief Push multiple items to the queue (Blocking).
+ * 
+ * Writes 'count' items to the queue. If the queue fills up, it blocks
+ * until space is available, then continues writing.
+ * 
+ * @param q Pointer to the queue.
+ * @param data Pointer to the array of items to write.
+ * @param count Number of items to write.
+ * @return 0 on success, -1 on error.
+ */
+int queue_push_arr(queue_t *q, const void *data, size_t count);
+
+/**
+ * @brief Pop an item from the queue (Blocking).
  * 
  * Copies an item from the queue into the provided buffer. If the queue is empty,
  * the calling task blocks until data arrives.
@@ -53,10 +66,10 @@ int queue_send(queue_t *q, const void *item);
  * @param buffer Pointer to the memory where the received item will be copied.
  * @return 0 on success, -1 on error.
  */
-int queue_receive(queue_t *q, void *buffer);
+int queue_pop(queue_t *q, void *buffer);
 
 /**
- * @brief Send an item to the queue from an Interrupt Service Routine (Non-Blocking).
+ * @brief Push an item to the queue from an Interrupt Service Routine (Non-Blocking).
  * 
  * Copies the item into the queue if space is available. If the queue is full,
  * returns immediately with an error. Does NOT block.
@@ -65,10 +78,10 @@ int queue_receive(queue_t *q, void *buffer);
  * @param item Pointer to the data to copy.
  * @return 0 on success, -1 if queue is full or invalid.
  */
-int queue_send_from_isr(queue_t *q, const void *item);
+int queue_push_from_isr(queue_t *q, const void *item);
 
 /**
- * @brief Receive an item from the queue from an Interrupt Service Routine (Non-Blocking).
+ * @brief Pop an item from the queue from an Interrupt Service Routine (Non-Blocking).
  * 
  * Copies an item from the queue into the provided buffer. If the queue is empty,
  * returns immediately with an error. Does NOT block.
@@ -77,7 +90,7 @@ int queue_send_from_isr(queue_t *q, const void *item);
  * @param buffer Pointer to the memory where the received item will be copied.
  * @return 0 on success, -1 if queue is empty or invalid.
  */
-int queue_receive_from_isr(queue_t *q, void *buffer);
+int queue_pop_from_isr(queue_t *q, void *buffer);
 
 /**
  * @brief Peek at the item at the head of the queue without removing it.

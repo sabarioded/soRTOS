@@ -23,7 +23,7 @@ static void logger_task_entry(void *arg) {
 
     while (1) {
         /* Block until a log entry arrives */
-        if (queue_receive(log_queue, &entry) == 0) {
+        if (queue_pop(log_queue, &entry) == 0) {
             
             /* Save to history buffer */
             log_history[log_head] = entry;
@@ -121,7 +121,7 @@ void logger_log(const char *fmt, uintptr_t arg1, uintptr_t arg2) {
     entry.arg2 = arg2;
 
     /* Use ISR version to avoid blocking */
-    queue_send_from_isr(log_queue, &entry);
+    queue_push_from_isr(log_queue, &entry);
 }
 
 /* Get the logger queue for debugging */
