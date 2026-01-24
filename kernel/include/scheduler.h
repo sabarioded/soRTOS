@@ -9,19 +9,19 @@
 extern "C" {
 #endif
 
-/* Weights for Stride Scheduling (Higher weight = More CPU time) */
-#define TASK_WEIGHT_IDLE        1
-#define TASK_WEIGHT_LOW         10
-#define TASK_WEIGHT_NORMAL      20
-#define TASK_WEIGHT_HIGH        50
-
 typedef enum task_state {
     TASK_UNUSED = 0,
     TASK_READY,
     TASK_RUNNING,
     TASK_BLOCKED,
+    TASK_SLEEPING,
     TASK_ZOMBIE,
 } task_state_t;
+
+typedef struct wait_node {
+    void *task;
+    struct wait_node *next;
+} wait_node_t;
 
 typedef struct task_struct task_t;
 
@@ -38,7 +38,6 @@ void scheduler_start(void);
 
 /**
  * @brief Schedule the next task to run.
- * @note Internal function usually called by Context Switch handler or Tick Handler.
  */
 void schedule_next_task(void);
 
@@ -57,7 +56,25 @@ uint32_t scheduler_tick(void);
  * @param weight Task weight (higher number = more CPU time).
  * @return Task ID on success, -1 on failure.
  */
-int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_bytes, uint8_t weight);
+int32_t task_create(void (*task_func)(void *), 
+                    void *arg, 
+                    size_t stack_size_bytes, 
+                    uint8_t weight);
+
+/**
+ * @brief Create a new task with a statically allocated stack.
+ * @param task_func Entry function for the task.
+ * @param arg Argument to pass to the task function.
+ * @param stack_buffer Pointer to the user-provided stack memory.
+ * @param stack_size_bytes Size of the stack buffer.
+ * @param weight Task weight.
+ * @return Task ID on success, -1 on failure.
+ */
+int32_t task_create_static(void (*task_func)(void *), 
+                           void *arg, 
+                           void *stack_buffer, 
+                           size_t stack_size_bytes, 
+                           uint8_t weight);
 
 /**
  * @brief Delete a task.
@@ -74,12 +91,11 @@ void task_exit(void);
 
 /**
  * @brief Rearrange the task list, delete unused (ZOMBIE) tasks.
- * Should be called by the Idle Task.
  */
 void task_garbage_collection(void);
 
 /**
- * @brief Check all tasks for stack overflow (can be called periodically).
+ * @brief Check all tasks for stack overflow.
  */
 void task_check_stack_overflow(void);
 
@@ -129,14 +145,14 @@ void task_notify(uint16_t task_id, uint32_t value);
 
 /**
  * @brief Get the handle of the currently running task.
- * @return void* Opaque pointer to the current task (can be cast to task_t* internally).
+ * @return void* Opaque pointer to the current task.
  */
 void *task_get_current(void);
 
 /**
  * @brief Change the state of a specific task.
  * @warning This function does NOT lock interrupts. The caller must ensure 
- * thread safety (usually by disabling interrupts) before calling.
+ * thread safety before calling.
  * @param t Pointer to the task.
  * @param state New state to set.
  */
@@ -164,6 +180,13 @@ uint16_t task_get_id(task_t *t);
 uint8_t task_get_weight(task_t *t);
 
 /**
+ * @brief Set the weight of a task.
+ * @param t Pointer to the task.
+ * @param weight New weight.
+ */
+void task_set_weight(task_t *t, uint8_t weight);
+
+/**
  * @brief Get the remaining time slice of a task.
  * @param t Pointer to the task.
  * @return Remaining ticks.
@@ -185,11 +208,96 @@ size_t task_get_stack_size(task_t *t);
 void* task_get_stack_ptr(task_t *t);
 
 /**
- * @brief Get a task handle by index (for iteration/diagnostics).
- * @param index Index in the task list (0 to MAX_TASKS-1).
+ * @brief Get a task handle by index.
+ * @param index Index in the task list.
  * @return Pointer to task_t or NULL if index out of bounds.
  */
 task_t *scheduler_get_task_by_index(uint32_t index);
+
+/**
+ * @brief Get the embedded wait node for a task.
+ * Used by queues/mutexes to link the task into a wait list without dynamic allocation.
+ * @param task Pointer to the task.
+ * @return Pointer to the task's wait node.
+ */
+wait_node_t* task_get_wait_node(task_t *task);
+
+/**
+ * @brief Set the notification value for a task.
+ * @param t Pointer to the task.
+ * @param val Value to set.
+ */
+void task_set_notify_val(task_t *t, uint32_t val);
+
+/**
+ * @brief Get the notification value for a task.
+ * @param t Pointer to the task.
+ * @return Notification value.
+ */
+uint32_t task_get_notify_val(task_t *t);
+
+/**
+ * @brief Set the notification state for a task.
+ * @param t Pointer to the task.
+ * @param state State to set (0 or 1).
+ */
+void task_set_notify_state(task_t *t, uint8_t state);
+
+/**
+ * @brief Get the notification state for a task.
+ * @param t Pointer to the task.
+ * @return Notification state.
+ */
+uint8_t task_get_notify_state(task_t *t);
+
+/**
+ * @brief Get the total CPU ticks consumed by a task.
+ * @param t Pointer to the task.
+ * @return Total ticks.
+ */
+uint64_t task_get_cpu_ticks(task_t *t);
+
+/**
+ * @brief Get the base weight of a task.
+ * @param t Pointer to the task.
+ * @return Base weight.
+ */
+uint8_t task_get_base_weight(task_t *t);
+
+/**
+ * @brief Restore a task's weight to its base weight.
+ * @param t Pointer to the task.
+ */
+void task_restore_base_weight(task_t *t);
+
+/**
+ * @brief Temporarily boost a task's weight.
+ * @param t Pointer to the task.
+ * @param weight New effective weight (ignored if lower than current).
+ */
+void task_boost_weight(task_t *t, uint8_t weight);
+
+/**
+ * @brief Set event group wait parameters for a task.
+ * @param t Pointer to the task.
+ * @param bits Bits to wait for.
+ * @param flags Wait options (wait_all, clear_on_exit).
+ */
+void task_set_event_wait(task_t *t, uint32_t bits, uint8_t flags);
+
+/**
+ * @brief Get the event bits a task is waiting for (or the result).
+ * @param t Pointer to the task.
+ * @return Event bits.
+ */
+uint32_t task_get_event_bits(task_t *t);
+
+/**
+ * @brief Get the event flags for a task.
+ * @param t Pointer to the task.
+ * @return Flags.
+ */
+uint8_t task_get_event_flags(task_t *t);
 
 #ifdef __cplusplus
 }
