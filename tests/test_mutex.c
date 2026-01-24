@@ -4,10 +4,8 @@
 #include <string.h>
 #include <setjmp.h>
 #include "allocator.h"
-
-/* Access shared mocks */
-extern jmp_buf yield_jump;
-extern int mock_yield_count;
+#include <stdio.h>
+#include "test_common.h"
 
 /* Access global scheduler state (linked from scheduler.c) */
 extern task_t *task_current;
@@ -16,9 +14,6 @@ static uint8_t heap[4096];
 static task_t *t1;
 static task_t *t2;
 static void dummy_task(void *arg) { (void)arg; }
-
-extern void (*test_setUp_hook)(void);
-extern void (*test_tearDown_hook)(void);
 
 /* --- Setup / Teardown --- */
 
@@ -125,6 +120,7 @@ void test_mutex_unlock_handoff(void) {
 }
 
 void run_mutex_tests(void) {
+    printf("\n=== Starting Mutex Tests ===\n");
     test_setUp_hook = setUp_local;
     test_tearDown_hook = tearDown_local;
     UnitySetTestFile("tests/test_mutex.c");
@@ -133,4 +129,5 @@ void run_mutex_tests(void) {
     RUN_TEST(test_mutex_lock_recursive_handoff);
     RUN_TEST(test_mutex_contention_blocking);
     RUN_TEST(test_mutex_unlock_handoff);
+    printf("=== Mutex Tests Complete ===\n");
 }

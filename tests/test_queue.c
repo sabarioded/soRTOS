@@ -6,6 +6,7 @@
 #include <setjmp.h>
 #include "spinlock.h"
 #include <stdio.h>
+#include "test_common.h"
 
 /* 
  * We redefine the internal queue structure here to access private members.
@@ -47,11 +48,6 @@ static void dummy_task(void *arg) {
         platform_yield();
     } 
 }
-
-extern void (*test_setUp_hook)(void);
-extern void (*test_tearDown_hook)(void);
-extern jmp_buf yield_jump;
-extern int mock_yield_count;
 
 static void setUp_queue(void) {
     mock_yield_count = 0;

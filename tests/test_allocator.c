@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdio.h>
+#include "test_common.h"
 
 typedef struct BlockHeader {
     size_t size; 
@@ -21,9 +22,6 @@ typedef struct BlockHeader {
 #define POOL_SIZE 4096
 
 static uint8_t test_pool[POOL_SIZE];
-
-extern void (*test_setUp_hook)(void);
-extern void (*test_tearDown_hook)(void);
 
 /* Initialize the allocator with the test pool */
 static void setUp_local(void) {

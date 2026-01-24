@@ -6,9 +6,7 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include "platform.h"
-
-extern void (*test_setUp_hook)(void);
-extern void (*test_tearDown_hook)(void);
+#include "test_common.h"
 
 /* 
  * TEST HARNESS EXPLANATION:
@@ -21,11 +19,6 @@ extern void (*test_tearDown_hook)(void);
  * 4. The mocked platform_yield() (in test_common.c) calls longjmp(yield_jump, 1).
  * 5. Execution returns to the setjmp call with a return value of 1.
  */
-
-/* Access shared mocks */
-extern size_t mock_ticks;
-extern int mock_yield_count;
-extern jmp_buf yield_jump;
 
 static void dummy_task(void *arg) {
     (void)arg; 

@@ -1,214 +1,106 @@
-#include "unity.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include "platform.h"
+#include "spinlock.h"
+#include "arch_ops.h"
 #include <setjmp.h>
-#include <stddef.h>
-#include <stdint.h>
-#include "queue.h"
+#include "test_common.h"
 
-/* Shared Mock State */
+/* Platform Mock: No hardware to initialize on host */
+void platform_init(void) {
+}
+
+/* Platform Mock: Panic just exits the test runner with failure */
+void platform_panic(void) {
+    fprintf(stderr, "PLATFORM PANIC TRIGGERED!\n");
+    exit(EXIT_FAILURE);
+}
+
+/* Platform Mock: Return a fixed 1MHz frequency for calculations */
+size_t platform_get_cpu_freq(void) {
+    return 1000000; 
+}
+
+/* Platform Mock: Systick init is a no-op on host */
+void platform_systick_init(size_t tick_hz) {
+    (void)tick_hz;
+}
+
+/* Mock State: Current system tick count */
 size_t mock_ticks = 0;
-int mock_yield_count = 0;
+
+/* Platform Mock: Return the controlled mock tick count */
+size_t platform_get_ticks(void) {
+    return mock_ticks;
+}
+
+/* Platform Mock: CPU Idle does nothing in single-threaded test */
+void platform_cpu_idle(void) {
+
+}
+
+/* Platform Mock: Scheduler start just returns (we drive it manually) */
+void platform_start_scheduler(size_t stack_pointer) {
+    (void)stack_pointer;
+}
+
+/* Mock State: Jump buffer for context switch simulation */
 jmp_buf yield_jump;
+int mock_yield_count = 0;
 
-/* Platform Mocks */
-
-/**
- * @brief Mock implementation of platform_get_ticks.
- * 
- * Returns the simulated tick count.
- */
-size_t platform_get_ticks(void) { 
-    return mock_ticks; 
-}
-
-/**
- * @brief Mock implementation of platform_yield.
- * 
- * Simulates a context switch by jumping back to the test harness.
- */
-void platform_yield(void) { 
-    mock_yield_count++; 
-    /* Jump back to test function to simulate blocking */
-    longjmp(yield_jump, 1);
-}
-
-/**
- * @brief Mock implementation of platform_panic.
- * 
- * Fails the test immediately.
- */
-void platform_panic(void) { 
-    TEST_FAIL_MESSAGE("Platform Panic Triggered"); 
-}
-
-/**
- * @brief Mock implementation of platform_cpu_idle.
- */
-void platform_cpu_idle(void) { 
-}
-
-/**
- * @brief Mock implementation of platform_start_scheduler.
- */
-void platform_start_scheduler(size_t stack_pointer) { 
-    (void)stack_pointer; 
-}
-
-/**
- * @brief Mock implementation of platform_uart_init.
- */
-void platform_uart_init(void) {
-}
-
-/**
- * @brief Mock implementation of platform_uart_set_rx_notify.
- */
-void platform_uart_set_rx_notify(uint16_t task_id) { 
-    (void)task_id; 
-}
-
-/**
- * @brief Mock implementation of platform_uart_set_rx_queue.
- */
-void platform_uart_set_rx_queue(queue_t *q) { 
-    (void)q; 
-}
-
-/* Arch Mocks */
-
-/**
- * @brief Mock implementation of arch_irq_lock.
- */
-uint32_t arch_irq_lock(void) { 
-    return 0; 
-}
-
-/**
- * @brief Mock implementation of arch_irq_unlock.
- */
-void arch_irq_unlock(uint32_t key) { 
-    (void)key; 
-}
-
-/**
- * @brief Mock implementation of arch_irq_lock_soft.
- */
-uint32_t arch_irq_lock_soft(uint32_t priority_threshold) {
-    (void)priority_threshold;
-    return 0;
-}
-
-/**
- * @brief Mock implementation of arch_irq_unlock_soft.
- */
-void arch_irq_unlock_soft(uint32_t old) {
-    (void)old;
-}
-
-/**
- * @brief Mock implementation of arch_dsb.
- */
-void arch_dsb(void) {
-}
-
-/**
- * @brief Mock implementation of arch_isb.
- */
-void arch_isb(void) {
-}
-
-/**
- * @brief Mock implementation of arch_dmb.
- */
-void arch_dmb(void) {
-}
-
-/**
- * @brief Mock implementation of arch_wfi.
- */
-void arch_wfi(void) {
-}
-
-/**
- * @brief Mock implementation of arch_nop.
- */
-void arch_nop(void) {
-}
-
-/**
- * @brief Mock implementation of arch_set_psp.
- */
-void arch_set_psp(uint32_t psp) {
-    (void)psp;
-}
-
-/**
- * @brief Mock implementation of arch_irq_disable.
- */
-void arch_irq_disable(void) {
-}
-
-/**
- * @brief Mock implementation of arch_yield.
- */
-void arch_yield(void) {
-    platform_yield();
-}
-
-/**
- * @brief Mock implementation of arch_cpu_relax.
- */
-void arch_cpu_relax(void) {
-}
-
-/**
- * @brief Mock implementation of arch_memory_barrier.
- */
-void arch_memory_barrier(void) {
-}
-
-/**
- * @brief Mock implementation of arch_test_and_set.
- * 
- * Simulates atomic test-and-set behavior.
- */
-uint32_t arch_test_and_set(volatile uint32_t *ptr) {
-    uint32_t old = *ptr;
-    *ptr = 1;
-    return old;
-}
-
-/**
- * @brief Mock implementation of arch_reset.
- */
-void arch_reset(void) {
-    TEST_FAIL_MESSAGE("Arch Reset Triggered");
-}
-
-/**
- * @brief Mock implementation of arch_initialize_stack.
- */
-void *arch_initialize_stack(void *top_of_stack, 
-                            void (*task_func)(void *), 
-                            void *arg, 
-                            void (*exit_handler)(void)) {
-    (void)task_func; (void)arg; (void)exit_handler;
-    return top_of_stack;
-}
-
-/* Global hooks for setUp/tearDown to support multiple test suites in one binary */
+/* Test Hooks: Pointers to setUp/tearDown functions for the active suite */
 void (*test_setUp_hook)(void) = NULL;
 void (*test_tearDown_hook)(void) = NULL;
 
-/**
- * @brief Unity setUp callback.
- */
 void setUp(void) {
-    if (test_setUp_hook) test_setUp_hook();
+    if (test_setUp_hook) {
+        test_setUp_hook();
+    }
 }
 
-/**
- * @brief Unity tearDown callback.
- */
 void tearDown(void) {
-    if (test_tearDown_hook) test_tearDown_hook();
+    if (test_tearDown_hook) {
+        test_tearDown_hook();
+    }
+}
+
+/* 
+ * Platform Mock: Yield
+ * Simulates a context switch by jumping back to the test function 
+ * via longjmp. This allows tests to verify blocking behavior.
+ */
+void platform_yield(void) {
+    mock_yield_count++;
+    longjmp(yield_jump, 1);
+}
+
+/* Platform Mock: UART init */
+void platform_uart_init(void) {}
+
+/* Platform Mock: UART receive (always empty) */
+int platform_uart_getc(char *out_ch) {
+    return -1; 
+}
+
+/* Platform Mock: UART send (prints to stdout) */
+int platform_uart_puts(const char *s) {
+    return printf("%s", s);
+}
+
+/* Platform Mock: Reset exits the process */
+void platform_reset(void) {
+    exit(0);
+}
+
+/* Platform Mock: UART callbacks (no-op) */
+void platform_uart_set_rx_notify(uint16_t task_id) {
+    (void)task_id;
+}
+
+void platform_uart_set_rx_queue(queue_t *q) {
+    (void)q;
+}
+
+void platform_uart_set_tx_queue(queue_t *q) {
+    (void)q;
 }

@@ -6,14 +6,9 @@
 #include "platform.h"
 #include <string.h>
 #include <stdio.h>
-
-/* Access shared mocks */
-extern size_t mock_ticks;
+#include "test_common.h"
 
 static uint8_t heap[8192];
-
-extern void (*test_setUp_hook)(void);
-extern void (*test_tearDown_hook)(void);
 
 static void setUp_local(void) {
     mock_ticks = 0;

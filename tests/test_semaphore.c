@@ -4,19 +4,16 @@
 #include <string.h>
 #include <setjmp.h>
 #include "allocator.h"
+#include <stdio.h>
+#include "test_common.h"
 
-/* Access shared mocks */
-extern jmp_buf yield_jump;
-extern int mock_yield_count;
+/* Access global scheduler state */
 extern task_t *task_current;
 
 static uint8_t heap[4096];
 static task_t *t1;
 static task_t *t2;
 static void dummy_task(void *arg) { (void)arg; }
-
-extern void (*test_setUp_hook)(void);
-extern void (*test_tearDown_hook)(void);
 
 /* --- Setup --- */
 static void setUp_local(void) {
@@ -113,6 +110,7 @@ void test_sem_broadcast_wakes_all(void) {
 }
 
 void run_semaphore_tests(void) {
+    printf("\n=== Starting Semaphore Tests ===\n");
     test_setUp_hook = setUp_local;
     test_tearDown_hook = tearDown_local;
     UnitySetTestFile("tests/test_semaphore.c");
@@ -122,4 +120,5 @@ void run_semaphore_tests(void) {
     RUN_TEST(test_sem_signal_increments_count);
     RUN_TEST(test_sem_signal_wakes_task);
     RUN_TEST(test_sem_broadcast_wakes_all);
+    printf("=== Semaphore Tests Complete ===\n");
 }

@@ -2,9 +2,8 @@
 #include "timer.h"
 #include "scheduler.h"
 #include "allocator.h"
-
-/* Access shared mocks */
-extern size_t mock_ticks;
+#include <stdio.h>
+#include "test_common.h"
 
 static int callback_count = 0;
 static void *callback_arg = NULL;
@@ -15,9 +14,6 @@ static void timer_cb(void *arg) {
 }
 
 static uint8_t heap[4096];
-
-extern void (*test_setUp_hook)(void);
-extern void (*test_tearDown_hook)(void);
 
 static void setUp_local(void) {
     allocator_init(heap, sizeof(heap));
@@ -123,6 +119,7 @@ void test_timer_multiple_expiry(void) {
 }
 
 void run_timer_tests(void) {
+    printf("\n=== Starting Timer Tests ===\n");
     test_setUp_hook = setUp_local;
     test_tearDown_hook = tearDown_local;
     UnitySetTestFile("tests/test_timer.c");
@@ -131,4 +128,5 @@ void run_timer_tests(void) {
     RUN_TEST(test_timer_periodic);
     RUN_TEST(test_timer_restart);
     RUN_TEST(test_timer_multiple_expiry);
+    printf("=== Timer Tests Complete ===\n");
 }

@@ -2,9 +2,7 @@
 #include "utils.h"
 #include <string.h>
 #include <stdio.h>
-
-extern void (*test_setUp_hook)(void);
-extern void (*test_tearDown_hook)(void);
+#include "test_common.h"
 
 static void setUp_local(void) {
 }
