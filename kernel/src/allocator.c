@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include <string.h>
 #include "project_config.h"
+#include "logger.h"
 
 
 /* Calculate the actual number of Second Level indices */
@@ -174,6 +175,10 @@ static block_header_t* block_merge_prev(block_header_t *block) {
         block_remove(prev);
         
         /* Extend prev to cover block */
+        /* Update stats: We are reclaiming the header of 'block' as usable memory */
+        free_mem += BLOCK_OVERHEAD;
+        free_blocks--;
+
         size_t size = GET_SIZE(block);
         prev->size += size;
         
@@ -197,6 +202,10 @@ static block_header_t* block_merge_next(block_header_t *block) {
         /* Remove next from free list because its size about to change */
         block_remove(next);
         
+        /* Update stats: Reclaiming 'next' header */
+        free_mem += BLOCK_OVERHEAD;
+        free_blocks--;
+
         /* Extend block to cover next */
         size_t size = GET_SIZE(next);
         block->size += size;
@@ -228,6 +237,8 @@ static void block_trim(block_header_t *block, size_t size) {
         if ((void*)next < heap_end_ptr) {
             next->prev_phys_block = remaining;
         }
+        
+        remaining = block_merge_next(remaining);
         
         block_insert(remaining);
         
@@ -288,6 +299,9 @@ void allocator_init(uint8_t* pool, size_t size) {
     allocated_mem = 0;
     free_blocks = 1;
     allocated_blocks = 0;
+#if LOG_ENABLE
+    logger_log("Heap Init Size:%u", (uint32_t)size, 0);
+#endif
 }
 
 /* Allocate a block of memory of at least size bytes */
@@ -298,6 +312,10 @@ void* allocator_malloc(size_t size) {
     
     /* Add overhead and align */
     size_t adjust = size + BLOCK_OVERHEAD;
+    /* Check for overflow */
+    if (adjust < size) {
+        return NULL;
+    }
     size_t req_size = (adjust < BLOCK_MIN_SIZE) ? BLOCK_MIN_SIZE : ALIGN(adjust);
     
     uint32_t flags = spin_lock(&allocator_lock);
@@ -306,12 +324,15 @@ void* allocator_malloc(size_t size) {
     
     if (block) {
         block_remove(block);
+        
+        /* Update stats: Remove the ENTIRE block from free stats first */
+        free_mem -= (GET_SIZE(block) - BLOCK_OVERHEAD);
+        free_blocks--;
+
         block_trim(block, req_size);
         SET_USED(block);
         
-        free_mem -= (GET_SIZE(block) - BLOCK_OVERHEAD);
         allocated_mem += (GET_SIZE(block) - BLOCK_OVERHEAD);
-        free_blocks--;
         allocated_blocks++;
         
         spin_unlock(&allocator_lock, flags);
@@ -319,6 +340,9 @@ void* allocator_malloc(size_t size) {
     }
     
     spin_unlock(&allocator_lock, flags);
+#if LOG_ENABLE
+    logger_log("Malloc Fail Size:%u", (uint32_t)size, 0);
+#endif
     return NULL;
 }
 
@@ -334,11 +358,13 @@ void allocator_free(void* ptr) {
     
     /* Update stats */
     size_t size = GET_SIZE(block);
-    free_mem += (size - BLOCK_OVERHEAD);
     allocated_mem -= (size - BLOCK_OVERHEAD);
-    free_blocks++;
     allocated_blocks--;
     
+    /* Add to free stats (will be adjusted if merged) */
+    free_mem += (size - BLOCK_OVERHEAD);
+    free_blocks++;
+
     SET_FREE(block);
     block = block_merge_prev(block);
     block = block_merge_next(block);
@@ -371,6 +397,8 @@ void* allocator_realloc(void* ptr, size_t new_size) {
         /* Try to split */
         if (curr_size - req_size >= BLOCK_MIN_SIZE) {
             block_trim(block, req_size);
+            /* block_trim adds remainder to free stats. We must reduce allocated stats. */
+            allocated_mem -= (curr_size - req_size);
         }
         spin_unlock(&allocator_lock, flags);
         return ptr;
@@ -382,6 +410,11 @@ void* allocator_realloc(void* ptr, size_t new_size) {
         size_t combined_size = curr_size + GET_SIZE(next);
         if (combined_size >= req_size) {
             block_remove(next);
+            
+            /* Update stats: Consuming a free block */
+            free_mem -= (GET_SIZE(next) - BLOCK_OVERHEAD);
+            free_blocks--;
+            
             block->size = combined_size; /* Still used */
             
             /* Update next's next prev pointer */
@@ -390,9 +423,14 @@ void* allocator_realloc(void* ptr, size_t new_size) {
                 next_next->prev_phys_block = block;
             }
             
+            /* We gained 'next' as allocated memory (header + payload) */
+            allocated_mem += GET_SIZE(next);
+
             /* Split if too big */
             if (combined_size - req_size >= BLOCK_MIN_SIZE) {
                 block_trim(block, req_size);
+                /* block_trim adds remainder to free stats. Reduce allocated. */
+                allocated_mem -= (combined_size - req_size);
             }
             
             spin_unlock(&allocator_lock, flags);
@@ -474,24 +512,45 @@ int allocator_check_integrity(void) {
         /* Check alignment */
         if ((uintptr_t)curr & (ALIGN_SIZE - 1)) {
             spin_unlock(&allocator_lock, flags);
+#if LOG_ENABLE
+            logger_log("Heap Align Err", 0, 0);
+#endif
+            return -2; /* Block Alignment Error */
+        }
+        
+        /* Check header bits for corruption (bits between LSB and alignment) */
+        if (curr->size & (ALIGN_SIZE - 1) & ~BLOCK_FREE_BIT) {
+            spin_unlock(&allocator_lock, flags);
+#if LOG_ENABLE
+            logger_log("Heap Header Err", 0, 0);
+#endif
             return -2; /* Block Alignment Error */
         }
 
         /* Check size validity */
         if (size < BLOCK_MIN_SIZE) {
             spin_unlock(&allocator_lock, flags);
+#if LOG_ENABLE
+            logger_log("Heap Block Small", 0, 0);
+#endif
             return -3; /* Block too small (header corruption) */
         }
         
         /* Check boundary overflow */
         if ((void*)((uint8_t*)curr + size) > heap_end_ptr) {
             spin_unlock(&allocator_lock, flags);
+#if LOG_ENABLE
+            logger_log("Heap Overflow", 0, 0);
+#endif
             return -4; /* Size pushes past heap end */
         }
 
         /* Check physical link consistency */
         if (curr->prev_phys_block != prev) {
             spin_unlock(&allocator_lock, flags);
+#if LOG_ENABLE
+            logger_log("Heap Chain Broken", 0, 0);
+#endif
             return -5; /* Broken physical chain */
         }
         

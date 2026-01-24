@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "platform.h"
 #include "spinlock.h"
+#include "logger.h"
 
 typedef struct wait_node {
     void *task;
@@ -102,6 +103,9 @@ queue_t* queue_create(size_t item_size, size_t capacity) {
     q->buffer = allocator_malloc(item_size * capacity);
     if (!q->buffer) {
         allocator_free(q);
+#if LOG_ENABLE
+        logger_log("Queue Create Fail", 0, 0);
+#endif
         return NULL;
     }
 
@@ -342,6 +346,9 @@ void queue_reset(queue_t *q) {
     }
 
     spin_unlock(&q->lock, flags);
+#if LOG_ENABLE
+    logger_log("Queue Reset", 0, 0);
+#endif
 }
 
 /* Register a push callback */

@@ -5,6 +5,7 @@
 #include "platform.h"
 #include "arch_ops.h"
 #include "spinlock.h"
+#include "logger.h"
 
 /* Time Slice Configuration */
 #define BASE_SLICE_TICKS    2       /* Base ticks per weight unit */
@@ -386,6 +387,9 @@ void scheduler_init(void) {
     task_list[MAX_TASKS - 1].next = NULL;
     free_list = &task_list[0];
     spinlock_init(&scheduler_lock);
+#if LOG_ENABLE
+    logger_log("Scheduler Init", 0, 0);
+#endif
 }
 
 /* Start the scheduler */
@@ -411,6 +415,9 @@ void scheduler_start(void) {
 
     task_current = min_vrt_task;
     
+#if LOG_ENABLE
+    logger_log("Scheduler Start", 0, 0);
+#endif
     /* Mark first task as running */
     task_current->state = TASK_RUNNING;
     
@@ -506,6 +513,9 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
         new_task->next = free_list;
         free_list = new_task;
         spin_unlock(&scheduler_lock, stat);
+#if LOG_ENABLE
+        logger_log("Task Create Fail", 0, 0);
+#endif
         return -1;
     }
 
@@ -533,6 +543,9 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
 
     spin_unlock(&scheduler_lock, stat);
 
+#if LOG_ENABLE
+    logger_log("Task Create ID:%u", new_task->task_id, 0);
+#endif
     return new_task->task_id;
 }
 
@@ -554,6 +567,9 @@ int32_t task_delete(uint16_t task_id) {
 
     spin_unlock(&scheduler_lock, stat);
 
+#if LOG_ENABLE
+    if (res == 0) logger_log("Task Delete ID:%u", task_id, 0);
+#endif
     return res;
 }
 
@@ -672,6 +688,9 @@ void task_check_stack_overflow(void) {
 
             if (stack_base != NULL && stack_base[0] != STACK_CANARY) {
                 if (t == task_current) {
+#if LOG_ENABLE
+                    logger_log("Stack Overflow! ID:%u", t->task_id, 0);
+#endif
                     current_task_overflow = 1;
                 } else {
                     /* Kill other tasks immediately */
