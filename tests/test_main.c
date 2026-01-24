@@ -12,6 +12,7 @@ extern void run_semaphore_tests(void);
 extern void run_allocator_tests(void);
 extern void run_timer_tests(void);
 extern void run_logger_tests(void);
+extern void run_utils_tests(void);
 
 /* Main entry point for the unit test executable */
 int main(void) {
@@ -25,6 +26,7 @@ int main(void) {
     run_semaphore_tests();
     run_timer_tests();
     run_logger_tests();
+    run_utils_tests();
 
     /* Return failure count (0 = success) */
     return UNITY_END();
