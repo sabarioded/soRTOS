@@ -274,7 +274,7 @@ static block_header_t* block_locate_free(size_t size) {
 /* Initialize the memory pool and TLSF structures */
 void allocator_init(uint8_t* pool, size_t size) {
     spinlock_init(&allocator_lock);
-    memset(&control, 0, sizeof(control));
+    utils_memset(&control, 0, sizeof(control));
     
     uintptr_t raw_addr = (uintptr_t)pool;
     uintptr_t aligned_addr = ALIGN(raw_addr);
@@ -443,7 +443,7 @@ void* allocator_realloc(void* ptr, size_t new_size) {
     
     void* new_ptr = allocator_malloc(new_size);
     if (new_ptr) {
-        memcpy(new_ptr, ptr, curr_size - BLOCK_OVERHEAD);
+        utils_memcpy(new_ptr, ptr, curr_size - BLOCK_OVERHEAD);
         allocator_free(ptr);
     }
     return new_ptr;
