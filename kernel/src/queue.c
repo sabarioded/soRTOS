@@ -7,11 +7,6 @@
 #include "spinlock.h"
 #include "logger.h"
 
-typedef struct wait_node {
-    void *task;
-    struct wait_node *next;
-} wait_node_t;
-
 struct queue {
     void *buffer;                   /* Pointer to the allocated data storage */
     size_t item_size;               /* Size of a single item in bytes */
@@ -155,8 +150,15 @@ int queue_push(queue_t *q, const void *item) {
         return -1;
     }
     
-    wait_node_t node;
-    node.task = task_get_current();
+    task_t *current = (task_t*)task_get_current();
+    if (!current) {
+        return -1;
+    }
+
+    /* Get the persistent wait node from the task structure */
+    wait_node_t *node = task_get_wait_node(current);
+    node->task = current;
+    node->next = NULL;
 
     while (1) {
         uint32_t flags = spin_lock(&q->lock);
@@ -187,11 +189,11 @@ int queue_push(queue_t *q, const void *item) {
         /* Queue is full, add current task to TX wait queue and block */
         
         /* Ensure we aren't already in the list */
-        _remove_task_from_list(&q->tx_wait_head, &q->tx_wait_tail, node.task);
+        _remove_task_from_list(&q->tx_wait_head, &q->tx_wait_tail, current);
         
-        _add_to_wait_list(&q->tx_wait_head, &q->tx_wait_tail, &node);
+        _add_to_wait_list(&q->tx_wait_head, &q->tx_wait_tail, node);
         
-        task_set_state((task_t*)node.task, TASK_BLOCKED);
+        task_set_state(current, TASK_BLOCKED);
 
         spin_unlock(&q->lock, flags);
         /* Yield CPU to allow other tasks to run (and hopefully consume data) */
@@ -207,17 +209,24 @@ int queue_push_arr(queue_t *q, const void *data, size_t count) {
     
     const uint8_t *ptr = (const uint8_t*)data;
     size_t remaining = count;
-    wait_node_t node;
-    node.task = task_get_current();
+    
+    task_t *current = (task_t*)task_get_current();
+    if (!current) {
+        return -1;
+    }
+
+    wait_node_t *node = task_get_wait_node(current);
+    node->task = current;
+    node->next = NULL;
 
     while (remaining > 0) {
         uint32_t flags = spin_lock(&q->lock);
 
         /* If queue is full, block */
         if (q->count == q->capacity) {
-            _remove_task_from_list(&q->tx_wait_head, &q->tx_wait_tail, node.task);
-            _add_to_wait_list(&q->tx_wait_head, &q->tx_wait_tail, &node);
-            task_set_state((task_t*)node.task, TASK_BLOCKED);
+            _remove_task_from_list(&q->tx_wait_head, &q->tx_wait_tail, current);
+            _add_to_wait_list(&q->tx_wait_head, &q->tx_wait_tail, node);
+            task_set_state(current, TASK_BLOCKED);
             
             spin_unlock(&q->lock, flags);
             platform_yield();
@@ -267,8 +276,14 @@ int queue_pop(queue_t *q, void *buffer) {
         return -1;
     }
 
-    wait_node_t node;
-    node.task = task_get_current();
+    task_t *current = (task_t*)task_get_current();
+    if (!current) {
+        return -1;
+    }
+
+    wait_node_t *node = task_get_wait_node(current);
+    node->task = current;
+    node->next = NULL;
 
     while (1) {
         uint32_t flags = spin_lock(&q->lock);
@@ -292,11 +307,11 @@ int queue_pop(queue_t *q, void *buffer) {
         }
 
         /* Queue is empty, add current task to RX wait queue and block */
-        _remove_task_from_list(&q->rx_wait_head, &q->rx_wait_tail, node.task);
+        _remove_task_from_list(&q->rx_wait_head, &q->rx_wait_tail, current);
 
-        _add_to_wait_list(&q->rx_wait_head, &q->rx_wait_tail, &node);
+        _add_to_wait_list(&q->rx_wait_head, &q->rx_wait_tail, node);
         
-        task_set_state((task_t*)node.task, TASK_BLOCKED);
+        task_set_state(current, TASK_BLOCKED);
 
         spin_unlock(&q->lock, flags);
         platform_yield();
