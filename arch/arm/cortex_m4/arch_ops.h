@@ -167,6 +167,15 @@ static inline uint32_t arch_test_and_set(volatile uint32_t *ptr) {
 }
 
 /**
+ * @brief Get the current CPU ID.
+ * 
+ * @return Always 0 for single-core Cortex-M4.
+ */
+static inline uint32_t arch_get_cpu_id(void) {
+    return 0;
+}
+
+/**
  * @brief Reset the processor.
  */
 void arch_reset(void);
