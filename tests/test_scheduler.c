@@ -6,42 +6,38 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include "platform.h"
+#include <stdlib.h>
 #include "test_common.h"
 
 /* 
- * TEST HARNESS EXPLANATION:
- * These tests run in a single-threaded environment (the host PC).
- * To simulate context switching and blocking, we use setjmp/longjmp.
- * 
- * 1. The test sets a checkpoint using setjmp(yield_jump).
- * 2. The test calls a kernel function that should block (e.g., task_sleep_ticks).
- * 3. The kernel calls platform_yield().
- * 4. The mocked platform_yield() (in test_common.c) calls longjmp(yield_jump, 1).
- * 5. Execution returns to the setjmp call with a return value of 1.
- */
-
+* In this unit test harness, this function is NEVER actually executed.
+* It serves only as a valid function pointer for task_create().
+*/
 static void dummy_task(void *arg) {
     (void)arg; 
-    /* Tasks must loop forever. If they return, they become ZOMBIE. */
     while(1) {
         platform_yield();
     }
 }
 
 /* Set up and Tear down */
-static uint8_t heap_memory[65536];
+static uint8_t *heap_memory = NULL;
 
 static void setUp_local(void) {
     mock_ticks = 0;
     mock_yield_count = 0;
     
     /* Initialize dependencies */
-    allocator_init(heap_memory, sizeof(heap_memory));
+    heap_memory = malloc(65536);
+    allocator_init(heap_memory, 65536);
     scheduler_init();
 }
 
 static void tearDown_local(void) {
-
+    if (heap_memory) {
+        free(heap_memory);
+    }
+    heap_memory = NULL;
 }
 
 /* ##### Tests ##### */
@@ -97,7 +93,7 @@ void test_task_sleep_should_block_and_yield(void) {
     TEST_ASSERT_EQUAL(1, mock_yield_count); /* Should trigger context switch */
     
     task_t *t = (task_t*)task_get_current();
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t));
+    TEST_ASSERT_EQUAL(TASK_SLEEPING, task_get_state_atomic(t));
 }
 
 void test_scheduler_wake_sleeping_tasks(void) {
@@ -113,7 +109,7 @@ void test_scheduler_wake_sleeping_tasks(void) {
     /* Advance time partially - task should stay blocked */
     mock_ticks = 50;
     scheduler_tick();
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t));
+    TEST_ASSERT_EQUAL(TASK_SLEEPING, task_get_state_atomic(t));
     
     /* Advance time past wake target - task should be ready */
     mock_ticks = 100;
@@ -130,7 +126,7 @@ void test_equal_weight_switching(void) {
     
     void *t1 = task_get_current();
     
-    /* Force switch: Running task's vruntime will increase, causing a switch to the other task */
+    /* Running task's vruntime will increase, causing a switch to the other task */
     schedule_next_task(); 
     
     void *t2 = task_get_current();
@@ -176,7 +172,7 @@ void test_task_notify_wait_timeout(void) {
     }
     
     task_t *t = (task_t*)task_get_current();
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t));
+    TEST_ASSERT_EQUAL(TASK_SLEEPING, task_get_state_atomic(t));
     
     /* Advance time past timeout */
     mock_ticks = 60;
@@ -281,7 +277,7 @@ void test_sleep_list_ordering(void) {
     
     /* T2 (10 ticks) should wake. T1 (20 ticks) should block. */
     TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t2));
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t1));
+    TEST_ASSERT_EQUAL(TASK_SLEEPING, task_get_state_atomic(t1));
     
     /* Advance to 20 ticks */
     mock_ticks = 20;
@@ -402,6 +398,7 @@ void test_stress_task_churn(void) {
     
     /* 4. Try to refill the holes */
     int new_count = 0;
+
     for (int i = 0; i < MAX_TASKS; i++) {
         int32_t id = task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
         if (id < 0) break;
@@ -409,7 +406,12 @@ void test_stress_task_churn(void) {
     }
     
     /* We should have been able to create roughly count/2 new tasks */
-    TEST_ASSERT_GREATER_THAN(0, new_count);
+    TEST_ASSERT_EQUAL(MAX_TASKS, count);
+
+    int expected_deleted = count / 2;
+    int tolerance = 2; /* Tolerate small differences */
+
+    TEST_ASSERT_INT_WITHIN(tolerance, expected_deleted, new_count);
 }
 
 void test_stress_interleaved_sleep_wakeups(void) {
@@ -421,7 +423,10 @@ void test_stress_interleaved_sleep_wakeups(void) {
     scheduler_start();
     
     /* T1 sleeps 30 ticks */
-    if (setjmp(yield_jump) == 0) { task_sleep_ticks(30); TEST_FAIL_MESSAGE("Should have yielded"); }
+    if (setjmp(yield_jump) == 0) {
+        task_sleep_ticks(30); 
+        TEST_FAIL_MESSAGE("Should have yielded"); 
+    }
     
     /* Switch to T3 (Heap behavior with equal weights: T3 pops before T2) */
     schedule_next_task();
@@ -429,7 +434,10 @@ void test_stress_interleaved_sleep_wakeups(void) {
     TEST_ASSERT_EQUAL(id3, task_get_id(curr));
     
     /* T3 sleeps 10 ticks */
-    if (setjmp(yield_jump) == 0) { task_sleep_ticks(10); TEST_FAIL_MESSAGE("Should have yielded"); }
+    if (setjmp(yield_jump) == 0) { 
+        task_sleep_ticks(10); 
+        TEST_FAIL_MESSAGE("Should have yielded"); 
+    }
     
     /* Switch to T2 */
     schedule_next_task();
@@ -437,7 +445,10 @@ void test_stress_interleaved_sleep_wakeups(void) {
     TEST_ASSERT_EQUAL(id2, task_get_id(curr));
     
     /* T2 sleeps 20 ticks */
-    if (setjmp(yield_jump) == 0) { task_sleep_ticks(20); TEST_FAIL_MESSAGE("Should have yielded"); }
+    if (setjmp(yield_jump) == 0) { 
+        task_sleep_ticks(20); 
+        TEST_FAIL_MESSAGE("Should have yielded"); 
+    }
     
     /* Get handles */
     task_t *t1 = scheduler_get_task_by_index(0);
@@ -448,14 +459,14 @@ void test_stress_interleaved_sleep_wakeups(void) {
     mock_ticks = 10;
     scheduler_tick();
     TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t3));
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t2));
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t1));
+    TEST_ASSERT_EQUAL(TASK_SLEEPING, task_get_state_atomic(t2));
+    TEST_ASSERT_EQUAL(TASK_SLEEPING, task_get_state_atomic(t1));
     
     /* Tick 20: T2 should wake */
     mock_ticks = 20;
     scheduler_tick();
     TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t2));
-    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t1));
+    TEST_ASSERT_EQUAL(TASK_SLEEPING, task_get_state_atomic(t1));
     
     /* Tick 30: T1 should wake */
     mock_ticks = 30;
@@ -480,13 +491,21 @@ void test_stress_vruntime_chain(void) {
         task_t *curr = (task_t*)task_get_current();
         uint16_t id = task_get_id(curr);
         
-        if (id == id1) t1_ran++;
-        else if (id == id2) t2_ran++;
-        else if (id == id3) t3_ran++;
+        if (id == id1) {
+            t1_ran++;
+        }
+        else if (id == id2) { 
+            t2_ran++;
+        }
+        else if (id == id3) {
+            t3_ran++;
+        }
         
         /* Burn time slice */
         uint32_t slice = task_get_time_slice(curr);
-        for(uint32_t k=0; k<slice; k++) scheduler_tick();
+        for(uint32_t k=0; k<slice; k++) {
+            scheduler_tick();
+        }
         
         schedule_next_task();
     }
@@ -495,6 +514,170 @@ void test_stress_vruntime_chain(void) {
     TEST_ASSERT_GREATER_THAN(0, t1_ran);
     TEST_ASSERT_GREATER_THAN(0, t2_ran);
     TEST_ASSERT_GREATER_THAN(0, t3_ran);
+}
+
+void test_task_set_weight(void) {
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    scheduler_start();
+    
+    task_t *curr = (task_t*)task_get_current();
+    TEST_ASSERT_EQUAL(TASK_WEIGHT_NORMAL, task_get_weight(curr));
+    
+    task_set_weight(curr, TASK_WEIGHT_HIGH);
+    TEST_ASSERT_EQUAL(TASK_WEIGHT_HIGH, task_get_weight(curr));
+    
+    /* Verify 0 is clamped to 1 */
+    task_set_weight(curr, 0);
+    TEST_ASSERT_EQUAL(1, task_get_weight(curr));
+}
+
+void test_task_cpu_usage(void) {
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    scheduler_start();
+    
+    task_t *curr = (task_t*)task_get_current();
+    
+    /* Initial usage should be 0 */
+    TEST_ASSERT_EQUAL_UINT64(0, task_get_cpu_ticks(curr));
+    
+    /* Advance time by 100 ticks */
+    mock_ticks += 100;
+    
+    /* Trigger a schedule event (which updates stats for the running task) */
+    schedule_next_task();
+    
+    /* Verify usage increased */
+    TEST_ASSERT_EQUAL_UINT64(100, task_get_cpu_ticks(curr));
+}
+
+void test_task_create_static_success(void) {
+    uint8_t *static_stack = malloc(STACK_SIZE_1KB + 16);
+    TEST_ASSERT_NOT_NULL(static_stack);
+
+    size_t free_before = allocator_get_free_size();
+    
+    /* Create task with provided stack */
+    int32_t id = task_create_static(dummy_task, NULL, static_stack, STACK_SIZE_1KB + 16, TASK_WEIGHT_NORMAL);
+    TEST_ASSERT_GREATER_THAN(0, id);
+    
+    /* Should NOT have consumed heap memory */
+    size_t free_after = allocator_get_free_size();
+    TEST_ASSERT_EQUAL(free_before, free_after);
+    
+    /* Cleanup */
+    task_delete((uint16_t)id);
+    task_garbage_collection();
+    free(static_stack);
+}
+
+void test_task_create_static_gc_safety(void) {
+    uint8_t *static_stack = malloc(STACK_SIZE_1KB + 16);
+    TEST_ASSERT_NOT_NULL(static_stack);
+
+    /* Fill stack with known pattern */
+    memset(static_stack, 0xAA, STACK_SIZE_1KB + 16);
+    
+    int32_t id = task_create_static(dummy_task, NULL, static_stack, STACK_SIZE_1KB + 16, TASK_WEIGHT_NORMAL);
+    TEST_ASSERT_GREATER_THAN(0, id);
+    
+    task_delete((uint16_t)id);
+    
+    /* If logic is correct, it will skip freeing static_stack_buffer. */
+    task_garbage_collection();
+    
+    /* Verify heap is still healthy */
+    TEST_ASSERT_EQUAL(0, allocator_check_integrity());
+    
+    free(static_stack);
+}
+
+void test_task_create_static_invalid_args(void) {
+    uint8_t dummy_buf[16];
+    TEST_ASSERT_EQUAL(-1, task_create_static(dummy_task, NULL, NULL, 1024, 1));
+    TEST_ASSERT_EQUAL(-1, task_create_static(dummy_task, NULL, dummy_buf, 10, 1)); /* Too small */
+}
+
+void test_idle_task_cannot_sleep(void) {
+    /* Ensure clean state */
+    scheduler_init();
+    
+    /* Start scheduler with NO user tasks. This forces it to pick the IDLE task. */
+    scheduler_start();
+    
+    /* Verify we are running (as the idle task) */
+    TEST_ASSERT_NOT_NULL(task_get_current());
+    
+    /* Try to sleep. Should fail because Idle task cannot sleep. */
+    int res = task_sleep_ticks(10);
+    TEST_ASSERT_EQUAL(-1, res);
+}
+
+void test_task_accessors(void) {
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    scheduler_start();
+    
+    task_t *t = (task_t*)task_get_current();
+    
+    /* Notify Value */
+    task_set_notify_val(t, 0xDEADBEEF);
+    TEST_ASSERT_EQUAL_UINT32(0xDEADBEEF, task_get_notify_val(t));
+    
+    /* Notify State */
+    task_set_notify_state(t, 1);
+    TEST_ASSERT_EQUAL_UINT8(1, task_get_notify_state(t));
+    task_set_notify_state(t, 0);
+    TEST_ASSERT_EQUAL_UINT8(0, task_get_notify_state(t));
+    
+    /* Stack Size */
+    TEST_ASSERT_GREATER_OR_EQUAL(512, task_get_stack_size(t));
+    
+    /* Stack Pointer */
+    TEST_ASSERT_NOT_NULL(task_get_stack_ptr(t));
+    
+    /* Wait Node */
+    TEST_ASSERT_NOT_NULL(task_get_wait_node(t));
+}
+
+void test_task_weight_boosting(void) {
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_LOW);
+    scheduler_start();
+    
+    task_t *t = (task_t*)task_get_current();
+    
+    TEST_ASSERT_EQUAL_UINT8(TASK_WEIGHT_LOW, task_get_weight(t));
+    TEST_ASSERT_EQUAL_UINT8(TASK_WEIGHT_LOW, task_get_base_weight(t));
+    
+    /* Boost */
+    task_boost_weight(t, TASK_WEIGHT_HIGH);
+    TEST_ASSERT_EQUAL_UINT8(TASK_WEIGHT_HIGH, task_get_weight(t));
+    TEST_ASSERT_EQUAL_UINT8(TASK_WEIGHT_LOW, task_get_base_weight(t)); /* Base should be unchanged */
+    
+    /* Boost lower (should be ignored) */
+    task_boost_weight(t, TASK_WEIGHT_NORMAL);
+    TEST_ASSERT_EQUAL_UINT8(TASK_WEIGHT_HIGH, task_get_weight(t));
+    
+    /* Restore */
+    task_restore_base_weight(t);
+    TEST_ASSERT_EQUAL_UINT8(TASK_WEIGHT_LOW, task_get_weight(t));
+}
+
+void test_task_event_accessors(void) {
+    task_create(dummy_task, NULL, 512, TASK_WEIGHT_NORMAL);
+    scheduler_start();
+    
+    task_t *t = (task_t*)task_get_current();
+    
+    task_set_event_wait(t, 0x0F, 0x01);
+    TEST_ASSERT_EQUAL_UINT32(0x0F, task_get_event_bits(t));
+    TEST_ASSERT_EQUAL_UINT8(0x01, task_get_event_flags(t));
+}
+
+void test_task_notify_invalid_id(void) {
+    /* Should not crash or hang */
+    task_notify(0, 1);
+    task_notify(9999, 1);
+
+    TEST_PASS();
 }
 
 void run_scheduler_tests(void) {
@@ -525,6 +708,16 @@ void run_scheduler_tests(void) {
     RUN_TEST(test_stress_task_churn);
     RUN_TEST(test_stress_interleaved_sleep_wakeups);
     RUN_TEST(test_stress_vruntime_chain);
+    RUN_TEST(test_task_set_weight);
+    RUN_TEST(test_task_cpu_usage);
+    RUN_TEST(test_task_create_static_success);
+    RUN_TEST(test_task_create_static_gc_safety);
+    RUN_TEST(test_task_create_static_invalid_args);
+    RUN_TEST(test_idle_task_cannot_sleep);
+    RUN_TEST(test_task_accessors);
+    RUN_TEST(test_task_weight_boosting);
+    RUN_TEST(test_task_event_accessors);
+    RUN_TEST(test_task_notify_invalid_id);
 
     printf("=== Scheduler Tests Complete ===\n");
 }
