@@ -2,12 +2,13 @@
 #define CLI_H
 
 #include <stdint.h>
+#include "queue.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/****** Return codes ******/
+/* Return codes */
 typedef enum {
     CLI_OK              = 0,
     CLI_ERR             = -1,
@@ -23,14 +24,14 @@ typedef enum {
  */
 typedef int (*cli_cmd_fn_t)(int argc, char **argv);
 
-/* IO Abstraction 
+/* IO Abstraction callbacks
  * getc: Reads 1 char. Returns 1 if char read, 0 if no char available (non-blocking).
  * puts: Writes string. Returns number of bytes written.
  */
 typedef int (*cli_getc_fn_t)(char *out_ch); 
 typedef int (*cli_puts_fn_t)(const char *s); 
 
-/****** Command definition structure ******/
+/* Command definition structure */
 typedef struct {
     const char     *name;    /* Command name (no spaces allowed) */
     const char     *help;    /* Short help string */
@@ -76,6 +77,21 @@ void cli_task_entry(void *arg);
  * Formats string and sends it via the registered 'puts' function.
  */
 uint32_t cli_printf(const char *fmt, ...);
+
+
+/**
+ * @brief Set the input queue for the CLI.
+ * @param q Pointer to the queue
+ */
+void cli_set_rx_queue(queue_t *q);
+
+
+/**
+ * @brief Set the output queue for the CLI.
+ * If set, output will be pushed to this queue instead of using the puts callback.
+ * @param q Pointer to the queue.
+ */
+void cli_set_tx_queue(queue_t *q);
 
 
 #ifdef __cplusplus
