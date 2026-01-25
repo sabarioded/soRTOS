@@ -19,12 +19,12 @@ To handle blocking when the queue is full (for senders) or empty (for receivers)
 *   **`rx_wait_head` / `rx_wait_tail`**: List of tasks waiting to **receive** data (Queue Empty).
 *   **`tx_wait_head` / `tx_wait_tail`**: List of tasks waiting to **send** data (Queue Full).
 
-These are managed as FIFO lists to ensure fairness. Each node in the list is allocated on the **stack** of the blocking task. This avoids dynamic memory allocation overhead and fragmentation. The node is automatically valid as long as the task is blocked.
+These are managed as FIFO lists to ensure fairness. Each node in the list is embedded in the `task_t` structure (`wait_node`). This avoids dynamic memory allocation overhead and fragmentation.
 
 ## How it Works
 
-### Sending Data (`queue_send`)
-1.  **Lock:** Interrupts are disabled to ensure atomicity (`arch_irq_lock`).
+### Sending Data (`queue_push`)
+1.  **Lock:** A spinlock is acquired to ensure thread safety (`spin_lock`).
 2.  **Check Space:**
     *   **If Space Available:**
         1.  Copy data to `buffer[tail]`.
@@ -34,13 +34,13 @@ These are managed as FIFO lists to ensure fairness. Each node in the list is all
         5.  **Callback:** If a push callback is registered, execute it.
         6.  Unlock and return success.
     *   **If Queue Full:**
-        1.  Create a wait node on the stack and add it to the `tx_wait_list`.
+        1.  Add the current task's embedded wait node to the `tx_wait_list`.
         2.  Set current task state to `TASK_BLOCKED`.
         3.  Unlock and **Yield**.
         4.  When woken (by a receiver removing an item), the loop restarts to retry the operation.
 
-### Receiving Data (`queue_receive`)
-1.  **Lock:** Interrupts are disabled.
+### Receiving Data (`queue_pop`)
+1.  **Lock:** A spinlock is acquired.
 2.  **Check Data:**
     *   **If Data Available:**
         1.  Copy data from `buffer[head]`.
@@ -49,14 +49,14 @@ These are managed as FIFO lists to ensure fairness. Each node in the list is all
         4.  **Wake Sender:** If the `tx_wait_list` is not empty, pop the head task and mark it `TASK_READY`.
         5.  Unlock and return success.
     *   **If Queue Empty:**
-        1.  Create a wait node on the stack and add it to the `rx_wait_list`.
+        1.  Add the current task's embedded wait node to the `rx_wait_list`.
         2.  Set current task state to `TASK_BLOCKED`.
         3.  Unlock and **Yield**.
         4.  When woken (by a sender adding an item), the loop restarts to retry the operation.
 
 ### Interrupt Safety (`_from_isr`)
-ISR versions (`queue_send_from_isr`, `queue_receive_from_isr`) are **non-blocking**.
-*   They lock interrupts (safe to do inside an ISR).
+ISR versions (`queue_push_from_isr`, `queue_pop_from_isr`) are **non-blocking**.
+*   They acquire the spinlock (safe to do inside an ISR).
 *   If the operation cannot be performed immediately (Full/Empty), they return an error code (`-1`) instead of blocking.
 *   They still wake up blocked tasks if the operation succeeds.
 
@@ -66,11 +66,11 @@ ISR versions (`queue_send_from_isr`, `queue_receive_from_isr`) are **non-blockin
 | :--- | :--- | :--- |
 | `queue_create` | Allocates memory for queue and buffer. | No |
 | `queue_delete` | Frees memory. | No |
-| `queue_send` | Pushes item to back. | **Yes** (if full) |
-| `queue_receive` | Pops item from front. | **Yes** (if empty) |
+| `queue_push` | Pushes item to back. | **Yes** (if full) |
+| `queue_pop` | Pops item from front. | **Yes** (if empty) |
 | `queue_peek` | Reads front without removing. | No |
-| `queue_send_from_isr` | Pushes item (for ISRs). | No |
-| `queue_receive_from_isr` | Pops item (for ISRs). | No |
+| `queue_push_from_isr` | Pushes item (for ISRs). | No |
+| `queue_pop_from_isr` | Pops item (for ISRs). | No |
 | `queue_reset` | Clears data and wakes all writers. | No |
 | `queue_set_push_callback` | Registers a callback for when data is pushed. | No |
 
@@ -82,11 +82,11 @@ queue_t *q = queue_create(sizeof(int), 10);
 
 /* Task A: Sender */
 int data = 42;
-if (queue_send(q, &data) == 0) {
+if (queue_push(q, &data) == 0) {
     // Success
 }
 
 /* Task B: Receiver */
 int rx_val;
-queue_receive(q, &rx_val); // Blocks until data arrives
+queue_pop(q, &rx_val); // Blocks until data arrives
 ```

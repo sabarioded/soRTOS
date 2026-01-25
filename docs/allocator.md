@@ -3,12 +3,14 @@
 ## Overview
 The **soRTOS** memory allocator uses the **TLSF (Two-Level Segregated Fit)** algorithm. It is designed for real-time systems where predictability is critical.
 
-Unlike standard allocators that might search through a long list of free blocks (taking longer as memory gets fragmented), TLSF performs all operations in **O(1)** (constant) time. This means `malloc` and `free` are always fast and deterministic.
+Unlike standard allocators that might search through a long list of free blocks (taking longer as memory gets fragmented), TLSF performs all operations in **O(1)** (constant) time. This means `malloc` and `free` take the same amount of time regardless of the heap size or fragmentation state.
+
+It is fully **thread-safe**, protected by a spinlock to ensure atomic access even in multi-core environments.
 
 ## Core Concepts
 
 ### 1. The Block Header
-Every memory block, whether used or free, starts with a header structure. This metadata allows the allocator to manage the block.
+Every memory block, whether used or free, starts with a header. This metadata allows the allocator to manage the block and merge it with neighbors when freed.
 
 ```c
 typedef struct BlockHeader {
