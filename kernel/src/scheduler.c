@@ -7,55 +7,65 @@
 #include "spinlock.h"
 #include "logger.h"
 
-/* Time Slice Configuration */
-#define BASE_SLICE_TICKS    2       /* Base ticks per weight unit */
-#define VRUNTIME_SCALER     1000    /* Scaling factor for vruntime calc */
+/* Modular arithmetic comparison for vruntime to handle overflow/wrap-around */
+#define VRUNTIME_LT(a, b)   ((int64_t)((a) - (b)) < 0)
 
 /* Bitmap helper macros */
 #define BITMAP_IDX(id)  ((size_t)((id) - 1) / 64)
 #define BITMAP_BIT(id)  ((size_t)((id) - 1) % 64)
 #define BITMAP_SIZE     ((MAX_TASKS + 63) / 64)
-#define IS_ID_USED(id)   (task_id_bitmap[BITMAP_IDX(id)] & (1ULL << BITMAP_BIT(id)))
-#define MARK_ID_USED(id) (task_id_bitmap[BITMAP_IDX(id)] |= (1ULL << BITMAP_BIT(id)))
-#define MARK_ID_FREE(id) (task_id_bitmap[BITMAP_IDX(id)] &= ~(1ULL << BITMAP_BIT(id)))
+#define IS_ID_USED(id)   (g_sched.id_bitmap[BITMAP_IDX(id)] & (1ULL << BITMAP_BIT(id)))
+#define MARK_ID_USED(id) (g_sched.id_bitmap[BITMAP_IDX(id)] |= (1ULL << BITMAP_BIT(id)))
+#define MARK_ID_FREE(id) (g_sched.id_bitmap[BITMAP_IDX(id)] &= ~(1ULL << BITMAP_BIT(id)))
 
 typedef struct task_struct {
     void            *psp;               /* Platform-agnostic Stack Pointer (Current Top) */
-    uint32_t        sleep_until_tick;   /* System Tick count when task should wake */
-    
     void            *stack_ptr;         /* Pointer to start of allocated memory */
+    struct task_struct *next;           /* Link for Sleep/Free/Zombie lists */
     size_t          stack_size;         /* Size of allocated stack in bytes */
-    
+    wait_node_t     wait_node;          /* Generic wait node for blocking */
+    uint64_t        vruntime;           /* Virtual runtime (fairness metric) */
+    uint64_t        total_cpu_ticks;
+    uint64_t        last_switch_tick;
+
+    uint32_t        sleep_until_tick;   /* System Tick count when task should wake */
+    uint32_t        time_slice;         /* Remaining ticks in current slice */
+    uint32_t        notify_val;         /* Task notification value */
+    uint32_t        event_mask;         /* Event Group: bits to wait for / result */
+
+    int16_t         heap_index;         /* Index in ready_heap (-1 if not in heap) */
+    uint16_t        task_id;            /* Unique Task ID */
+
     uint8_t         state;              /* Current task state */
     uint8_t         is_idle;            /* Flag for idle task identification */
-    uint16_t        task_id;            /* Unique Task ID */
-    
     uint8_t         weight;             /* User assigned weight */
-    uint32_t        time_slice;         /* Remaining ticks in current slice */
-    uint64_t        vruntime;           /* Virtual runtime (fairness metric) */
-    int32_t         heap_index;         /* Index in ready_heap (-1 if not in heap) */   
-    
-    uint32_t        notify_val;         /* Task notification value */
+    uint8_t         base_weight;        /* Base weight (before priority inheritance) */
     uint8_t         notify_state;       /* 0: None, 1: Pending */
-    struct task_struct *next;           /* Link for Sleep/Free/Zombie lists */
+    uint8_t         event_flags;        /* Event Group: wait_all, clear_on_exit, satisfied */
+    uint8_t         cpu_id;             /* CPU affinity */
 } task_t;
 
-task_t      task_list[MAX_TASKS];
-task_t      *task_current = NULL;
+typedef struct {
+    task_t          pool[MAX_TASKS];        /* Storage for tasks */
+    task_t          *free_list;
+    task_t          *zombie_list;
+    uint64_t        id_bitmap[BITMAP_SIZE];
+    uint32_t        count;
+    uint32_t        next_cpu;
+    spinlock_t      lock;
+} scheduler_global_t;
 
-/* Min-Heap for Ready Tasks (ordered by 'vruntime') */
-static task_t       *ready_heap[MAX_TASKS];
-static uint32_t     heap_size = 0;
+typedef struct {
+    task_t          *ready_heap[MAX_TASKS]; /* Min-Heap for Ready Tasks */
+    task_t          *sleep_list;
+    task_t          *idle_task;
+    task_t          *curr;
+    uint32_t        heap_size;
+    spinlock_t      lock;
+} scheduler_cpu_t;
 
-/* List for Sleeping/Free/Zombie Tasks */
-static task_t       *sleep_list_head = NULL;
-static task_t       *free_list = NULL;
-static task_t       *zombie_list = NULL;
-
-static uint32_t     task_count = 0;
-static uint64_t     task_id_bitmap[BITMAP_SIZE];
-static task_t       *idle_task = NULL;
-static spinlock_t   scheduler_lock;
+static scheduler_global_t g_sched;
+static scheduler_cpu_t    cpu_sched[MAX_CPUS];
 
 /**
  * The heap is implemented by a tree flattened into an array.
@@ -65,22 +75,22 @@ static spinlock_t   scheduler_lock;
  */
 
 /* Swap two tasks in the heap and update their index tracking */
-static inline void _swap_tasks(uint32_t i, uint32_t j) {
-    task_t *temp = ready_heap[i];
-    ready_heap[i] = ready_heap[j];
-    ready_heap[j] = temp;
+static inline void _swap_tasks(scheduler_cpu_t *ctx, uint32_t i, uint32_t j) {
+    task_t *temp = ctx->ready_heap[i];
+    ctx->ready_heap[i] = ctx->ready_heap[j];
+    ctx->ready_heap[j] = temp;
     
     /* Update indices in task structs */
-    ready_heap[i]->heap_index = i;
-    ready_heap[j]->heap_index = j;
+    ctx->ready_heap[i]->heap_index = i;
+    ctx->ready_heap[j]->heap_index = j;
 }
 
 /* Bubble up an element to maintain min-heap property */
-static void _heap_up(uint32_t index) {
+static void _heap_up(scheduler_cpu_t *ctx, uint32_t index) {
     while (index > 0) {
         uint32_t parent = (index - 1) / 2;
-        if (ready_heap[index]->vruntime < ready_heap[parent]->vruntime) {
-            _swap_tasks(index, parent);
+        if (VRUNTIME_LT(ctx->ready_heap[index]->vruntime, ctx->ready_heap[parent]->vruntime)) {
+            _swap_tasks(ctx, index, parent);
             index = parent;
         } else {
             break;
@@ -89,21 +99,23 @@ static void _heap_up(uint32_t index) {
 }
 
 /* Bubble down an element to maintain min-heap property */
-static void _heap_down(uint32_t index) {
+static void _heap_down(scheduler_cpu_t *ctx, uint32_t index) {
     while (1) {
         uint32_t left = 2 * index + 1; /* left child */
         uint32_t right = 2 * index + 2; /* right child */
         uint32_t smallest = index;
 
-        if (left < heap_size && ready_heap[left]->vruntime < ready_heap[smallest]->vruntime) {
+        if (left < ctx->heap_size &&
+            VRUNTIME_LT(ctx->ready_heap[left]->vruntime, ctx->ready_heap[smallest]->vruntime)) {
             smallest = left;
         }
-        if (right < heap_size && ready_heap[right]->vruntime < ready_heap[smallest]->vruntime) {
+        if (right < ctx->heap_size && 
+            VRUNTIME_LT(ctx->ready_heap[right]->vruntime, ctx->ready_heap[smallest]->vruntime)) {
             smallest = right;
         }
 
         if (smallest != index) {
-            _swap_tasks(index, smallest);
+            _swap_tasks(ctx, index, smallest);
             index = smallest;
         } else {
             break;
@@ -112,79 +124,79 @@ static void _heap_down(uint32_t index) {
 }
 
 /* Insert a task into the priority queue */
-static void _heap_insert(task_t *t) {
-    if (heap_size >= MAX_TASKS) {
+static void _heap_insert(scheduler_cpu_t *ctx, task_t *t) {
+    if (ctx->heap_size >= MAX_TASKS) {
         return;
     }
 
-    t->heap_index = heap_size;
-    ready_heap[heap_size] = t;
-    heap_size++;
-    _heap_up(heap_size - 1);
+    t->heap_index = ctx->heap_size;
+    ctx->ready_heap[ctx->heap_size] = t;
+    ctx->heap_size++;
+    _heap_up(ctx, ctx->heap_size - 1);
 }
 
 /* Extract the task with the lowest vruntime value (highest priority) */
-static task_t* _heap_pop_min(void) {
-    if (heap_size == 0) {
+static task_t* _heap_pop_min(scheduler_cpu_t *ctx) {
+    if (ctx->heap_size == 0) {
         return NULL;
     }
     
-    task_t *min = ready_heap[0];
+    task_t *min = ctx->ready_heap[0];
     min->heap_index = -1; /* Mark as not in heap */
     
-    heap_size--;
-    if (heap_size > 0) {
-        ready_heap[0] = ready_heap[heap_size];
-        ready_heap[0]->heap_index = 0;
-        _heap_down(0);
+    ctx->heap_size--;
+    if (ctx->heap_size > 0) {
+        ctx->ready_heap[0] = ctx->ready_heap[ctx->heap_size];
+        ctx->ready_heap[0]->heap_index = 0;
+        _heap_down(ctx, 0);
     }
     return min;
 }
 
 /* Remove a specific task from the middle of the heap */
-static void _heap_remove(task_t *t) {
-    if (t->heap_index == -1 || t->heap_index >= (int32_t)heap_size) {
+static void _heap_remove(scheduler_cpu_t *ctx, task_t *t) {
+    if (t->heap_index == -1 || t->heap_index >= (int32_t)ctx->heap_size) {
         return;
     }
     
     uint32_t index = (uint32_t)t->heap_index;
     t->heap_index = -1;
     
-    heap_size--;
-    if (index < heap_size) {
+    ctx->heap_size--;
+    if (index < ctx->heap_size) {
         /* Move last element to this spot */
-        ready_heap[index] = ready_heap[heap_size];
-        ready_heap[index]->heap_index = index;
+        ctx->ready_heap[index] = ctx->ready_heap[ctx->heap_size];
+        ctx->ready_heap[index]->heap_index = index;
         
         /* Rebalance (could go up or down) */
-        _heap_up(index);
-        _heap_down(index);
+        _heap_up(ctx, index);
+        _heap_down(ctx, index);
     }
 }
 
 /* Get the minimum vruntime value currently in the system */
-static inline uint64_t _get_min_vruntime(void) {
-    if (heap_size > 0) {
-        return ready_heap[0]->vruntime;
+static inline uint64_t _get_min_vruntime(scheduler_cpu_t *ctx) {
+    if (ctx->heap_size > 0) {
+        return ctx->ready_heap[0]->vruntime;
     }
-    return (task_current) ? task_current->vruntime : 0;
+    return (ctx->curr) ? ctx->curr->vruntime : 0;
 }
 
 /* Remove task from sleep list */
-static void _remove_from_sleep_list(task_t *task) {
+static void _remove_from_sleep_list(scheduler_cpu_t *ctx, task_t *task) {
     if (task == NULL) {
         return;
     }
 
     /* Removing head */
-    if (sleep_list_head == task) {
-        sleep_list_head = task->next;
+    if (ctx->sleep_list == task) {
+        ctx->sleep_list = task->next;
         task->next = NULL;
         return;
     }
 
     /* Removing from middle */
-    task_t *curr = sleep_list_head;
+    task_t *curr = ctx->sleep_list;
     while (curr != NULL && curr->next != task) {
         curr = curr->next;
     }
@@ -197,23 +209,18 @@ static void _remove_from_sleep_list(task_t *task) {
 }
 
 /* Insert task into sleep list (sorted by wake-up time) */
-static void _insert_into_sleep_list(task_t *task) {
+static void _insert_into_sleep_list(scheduler_cpu_t *ctx, task_t *task) {
     if (task == NULL) {
         return;
     }
 
-    /* We assume that the absolute tick value was calculated already
-    ** for example if we need to sleep for 50 ticks and the time is 50,000 than
-    ** the task->sleep_until_tick will be 50,050 
-    */
-
     /* If empty list or new head */
-    if (sleep_list_head == NULL || task->sleep_until_tick < sleep_list_head->sleep_until_tick) {
-        task->next = sleep_list_head;
-        sleep_list_head = task;
+    if (ctx->sleep_list == NULL || task->sleep_until_tick < ctx->sleep_list->sleep_until_tick) {
+        task->next = ctx->sleep_list;
+        ctx->sleep_list = task;
     } else {
         /* Otherwise insert in the middle */
-        task_t *curr = sleep_list_head;
+        task_t *curr = ctx->sleep_list;
         while (curr->next != NULL && curr->next->sleep_until_tick < task->sleep_until_tick) {
             curr = curr->next;
         }
@@ -222,44 +229,44 @@ static void _insert_into_sleep_list(task_t *task) {
     }
 }
 
-static void inline _wake_sleeping_task(task_t *task) {
+static void inline _wake_sleeping_task(scheduler_cpu_t *ctx, task_t *task) {
      task->state = TASK_READY;
      /* Insert into heap */
-     uint64_t min_v = _get_min_vruntime();
-     if (task->vruntime < min_v) {
+     uint64_t min_v = _get_min_vruntime(ctx);
+     if (VRUNTIME_LT(task->vruntime, min_v)) {
          task->vruntime = min_v;
      }
-     _heap_insert(task);
+     _heap_insert(ctx, task);
 }
 
-static void _process_sleep_list(uint32_t current_ticks) {
-    task_t *curr = sleep_list_head;
+static void _process_sleep_list(scheduler_cpu_t *ctx, uint32_t current_ticks) {
+    task_t *curr = ctx->sleep_list;
 
     /* Process tasks at head of the list whose time has come */
     while (curr != NULL && (int32_t)(current_ticks - curr->sleep_until_tick) >= 0) {
-        _remove_from_sleep_list(curr);
-        _wake_sleeping_task(curr);
-        curr = sleep_list_head;  /* Peek at new head */
+        _remove_from_sleep_list(ctx, curr);
+        _wake_sleeping_task(ctx, curr);
+        curr = ctx->sleep_list;  /* Peek at new head */
     }
 }
 
 /* Unblock a task (Assumes Lock Held) */
-static void _unblock_task_locked(task_t *task) {
-    if (task->state == TASK_BLOCKED) {
+static void _unblock_task_locked(scheduler_cpu_t *ctx, task_t *task) {
+    if (task->state == TASK_BLOCKED || task->state == TASK_SLEEPING) {
         /* Remove from sleep list if it was waiting with timeout */
-        if (task->sleep_until_tick > 0) {
-            _remove_from_sleep_list(task);
+        if (task->state == TASK_SLEEPING) {
+            _remove_from_sleep_list(ctx, task);
             task->sleep_until_tick = 0;
         }
 
         task->state = TASK_READY;
         
         /* Insert to heap */
-        uint64_t min_v = _get_min_vruntime();
-        if (task->vruntime < min_v) {
+        uint64_t min_v = _get_min_vruntime(ctx);
+        if (VRUNTIME_LT(task->vruntime, min_v)) {
             task->vruntime = min_v;
         }
-        _heap_insert(task);
+        _heap_insert(ctx, task);
     }
 }
 
@@ -285,8 +292,8 @@ static void _task_idle_function(void *arg) {
 }
 
 /* Create the idle task */
-static void _task_create_idle(void) {
-    if (idle_task != NULL) {
+static void _task_create_idle(scheduler_cpu_t *ctx) {
+    if (ctx->idle_task != NULL) {
         return; 
     }
 
@@ -301,11 +308,14 @@ static void _task_create_idle(void) {
 
     /* Mark the newly created task as the IDLE task */
     for (uint32_t i = 0; i < MAX_TASKS; ++i) {
-        if(task_list[i].task_id == task_id) {
-            idle_task = &task_list[i];
-            idle_task->is_idle = 1;
+        if(g_sched.pool[i].task_id == task_id) {
+            ctx->idle_task = &g_sched.pool[i];
+            ctx->idle_task->is_idle = 1;
+            /* Force affinity to this CPU */
+            ctx->idle_task->cpu_id = arch_get_cpu_id();
+            
             /* Idle tasks should not be in the ready heap */
-            _heap_remove(idle_task);
+            _heap_remove(ctx, ctx->idle_task);
             return;
         }
     }
@@ -313,22 +323,23 @@ static void _task_create_idle(void) {
 
 /* Rearrange active tasks and free zombie stacks (Internal: Lock must be held) */
 static void _task_garbage_collection_locked(void) {
-    while (zombie_list != NULL) {
-        task_t *t = zombie_list;
-        zombie_list = t->next;
+    while (g_sched.zombie_list != NULL) {
+        task_t *t = g_sched.zombie_list;
+        g_sched.zombie_list = t->next;
         
         /* Free the stack memory */
-        if (t->stack_ptr != NULL) {
+        if (t->stack_ptr != NULL && allocator_is_heap_pointer(t->stack_ptr)) {
+            /* Only free stacks that actually belong to the heap */
             allocator_free(t->stack_ptr);
             t->stack_ptr = NULL;
         }
         
         t->state = TASK_UNUSED;
-        t->next = free_list;
-        free_list = t;
+        t->next = g_sched.free_list;
+        g_sched.free_list = t;
         
-        if (task_count > 0) {
-            task_count--;
+        if (g_sched.count > 0) {
+            g_sched.count--;
         }
     }
 }
@@ -336,7 +347,7 @@ static void _task_garbage_collection_locked(void) {
 /* Delete a task (Internal: Lock must be held) */
 static int32_t _task_delete_locked(uint16_t task_id) {
     task_t *task_to_delete = NULL;
-    task_t *t = task_list;
+    task_t *t = g_sched.pool;
     for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
         if (t->task_id == task_id) {
             task_to_delete = t;
@@ -348,45 +359,58 @@ static int32_t _task_delete_locked(uint16_t task_id) {
         return -1;
     }
 
+    /* We need to lock the CPU that owns this task to remove it from lists */
+    uint32_t cpu = task_to_delete->cpu_id;
+    if (cpu >= MAX_CPUS) {
+        return -1;
+    }
+    
+    uint32_t cpu_flags = spin_lock(&cpu_sched[cpu].lock);
+
     /* Remove from heap if it's there */
-    _heap_remove(task_to_delete);
+    _heap_remove(&cpu_sched[cpu], task_to_delete);
     
     /* Remove from sleep list if it's there */
     if (task_to_delete->sleep_until_tick > 0) {
-        _remove_from_sleep_list(task_to_delete);
+        _remove_from_sleep_list(&cpu_sched[cpu], task_to_delete);
     }
+
+    /* Mark as ZOMBIE inside lock to prevent resurrection by task_notify */
+    task_to_delete->state = TASK_ZOMBIE;
+    
+    spin_unlock(&cpu_sched[cpu].lock, cpu_flags);
 
     if (task_to_delete->task_id > 0 && task_to_delete->task_id <= MAX_TASKS) {
         MARK_ID_FREE(task_to_delete->task_id);
     }
 
     /* Mark task as zombie. Its stack will be freed in garbage collection. */
-    task_to_delete->state = TASK_ZOMBIE;
     task_to_delete->task_id = 0;
     
     /* Add to zombie list for GC */
-    task_to_delete->next = zombie_list;
-    zombie_list = task_to_delete;
+    task_to_delete->next = g_sched.zombie_list;
+    g_sched.zombie_list = task_to_delete;
     
     return 0;
 }
 
 /* Initialize the scheduler */
 void scheduler_init(void) {
-    utils_memset(task_list, 0, sizeof(task_list));
-    task_current = NULL;
-    task_count = 0;
-    utils_memset(task_id_bitmap, 0, sizeof(task_id_bitmap));
-    idle_task = NULL;
-    heap_size = 0;
+    utils_memset(&g_sched, 0, sizeof(g_sched));
+    utils_memset(cpu_sched, 0, sizeof(cpu_sched));
 
     /* Initialize Free List */
     for (uint32_t i = 0; i < MAX_TASKS - 1; ++i) {
-        task_list[i].next = &task_list[i+1];
+        g_sched.pool[i].next = &g_sched.pool[i+1];
     }
-    task_list[MAX_TASKS - 1].next = NULL;
-    free_list = &task_list[0];
-    spinlock_init(&scheduler_lock);
+    g_sched.pool[MAX_TASKS - 1].next = NULL;
+    g_sched.free_list = &g_sched.pool[0];
+    spinlock_init(&g_sched.lock);
+    
+    for (int i = 0; i < MAX_CPUS; i++) {
+        spinlock_init(&cpu_sched[i].lock);
+    }
+    
 #if LOG_ENABLE
     logger_log("Scheduler Init", 0, 0);
 #endif
@@ -394,40 +418,43 @@ void scheduler_init(void) {
 
 /* Start the scheduler */
 void scheduler_start(void) {
-    if (task_count == 0 || idle_task == NULL) {
-        _task_create_idle(); 
+    uint32_t cpu = arch_get_cpu_id();
+    scheduler_cpu_t *ctx = &cpu_sched[cpu];
+
+    if (g_sched.count == 0 || ctx->idle_task == NULL) {
+        _task_create_idle(ctx); 
     }
 
     /* Pick the task to start with */
-    task_t *min_vrt_task = _heap_pop_min();
+    task_t *min_vrt_task = _heap_pop_min(ctx);
     
     if (min_vrt_task == NULL) {
         /* If heap is empty, try to run idle task directly */
-        if (idle_task != NULL) {
-            task_current = idle_task;
-            task_current->state = TASK_RUNNING;
-            platform_start_scheduler((size_t)task_current->psp);
+        if (ctx->idle_task != NULL) {
+            ctx->curr = ctx->idle_task;
+            ctx->curr->state = TASK_RUNNING;
+            platform_start_scheduler((size_t)ctx->curr->psp);
             return; /* Should not be reached on real hardware, but needed for tests */
         }
         platform_panic();
         return;
     }
 
-    task_current = min_vrt_task;
+    ctx->curr = min_vrt_task;
     
 #if LOG_ENABLE
     logger_log("Scheduler Start", 0, 0);
 #endif
     /* Mark first task as running */
-    task_current->state = TASK_RUNNING;
+    ctx->curr->state = TASK_RUNNING;
+    ctx->curr->last_switch_tick = (uint64_t)platform_get_ticks();
     
     /* Hand over control to the platform scheduler start */
-    platform_start_scheduler((size_t)task_current->psp);
+    platform_start_scheduler((size_t)ctx->curr->psp);
 }
 
 /* Create a new task */
-int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_bytes, uint8_t weight)
-{
+int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_bytes, uint8_t weight) {
     if (task_func == NULL) {
         return -1;
     }
@@ -440,51 +467,51 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
     size_t align_mask = (size_t)(PLATFORM_STACK_ALIGNMENT - 1);
     stack_size_bytes = (stack_size_bytes + align_mask) & ~align_mask;
 
-    uint32_t stat = spin_lock(&scheduler_lock);
+    uint32_t stat = spin_lock(&g_sched.lock);
 
-    if (free_list == NULL) {
-        /* Resource exhaustion: Try to reclaim zombie tasks immediately */
+    if (g_sched.free_list == NULL) {
+        /* Try to reclaim zombie tasks immediately */
         _task_garbage_collection_locked();
     }
 
-    if (free_list == NULL) {
-        spin_unlock(&scheduler_lock, stat);
+    if (g_sched.free_list == NULL) {
+        spin_unlock(&g_sched.lock, stat);
         return -1;
     }
-    task_t *new_task = free_list;
-    free_list = free_list->next;
+    task_t *new_task = g_sched.free_list;
+    g_sched.free_list = g_sched.free_list->next;
     new_task->next = NULL; /* Detach from free list */
 
     /* Allocate stack from heap */
     uint32_t *stack_base = (uint32_t*)allocator_malloc(stack_size_bytes);
     if (stack_base == NULL) {
         /* Allocation failed: Return task slot, run GC, and retry once */
-        new_task->next = free_list;
-        free_list = new_task;
+        new_task->next = g_sched.free_list;
+        g_sched.free_list = new_task;
         
         _task_garbage_collection_locked();
                 
         /* Re-acquire task slot */
-        if (free_list == NULL) {
-            spin_unlock(&scheduler_lock, stat);
+        if (g_sched.free_list == NULL) {
+            spin_unlock(&g_sched.lock, stat);
             return -1;
         }
-        new_task = free_list;
-        free_list = free_list->next;
+        new_task = g_sched.free_list;
+        g_sched.free_list = g_sched.free_list->next;
         new_task->next = NULL;
 
         /* Retry allocation */
         stack_base = (uint32_t*)allocator_malloc(stack_size_bytes);
         if (stack_base == NULL) {
             /* Failed again: Rollback and exit */
-            new_task->next = free_list;
-            free_list = new_task;
-            spin_unlock(&scheduler_lock, stat);
+            new_task->next = g_sched.free_list;
+            g_sched.free_list = new_task;
+            spin_unlock(&g_sched.lock, stat);
             return -1;
         }
     }
 
-    /* Calculate Top of Stack (highest address). Remmber stack grows down */
+    /* Calculate Top of Stack (highest address). Remember stack grows down */
     uint32_t *stack_end = (uint32_t*)((uint8_t*)stack_base + stack_size_bytes);
 
     /* Initialize task structure */
@@ -510,9 +537,9 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
     if (new_task->task_id == 0) {
         /* Rollback: Free stack and return task to free list */
         allocator_free(stack_base);
-        new_task->next = free_list;
-        free_list = new_task;
-        spin_unlock(&scheduler_lock, stat);
+        new_task->next = g_sched.free_list;
+        g_sched.free_list = new_task;
+        spin_unlock(&g_sched.lock, stat);
 #if LOG_ENABLE
         logger_log("Task Create Fail", 0, 0);
 #endif
@@ -522,30 +549,157 @@ int32_t task_create(void (*task_func)(void *), void *arg, size_t stack_size_byte
     new_task->sleep_until_tick = 0;
     new_task->notify_val = 0;
     new_task->notify_state = 0;
+    new_task->event_mask = 0;
+    new_task->event_flags = 0;
+    
+    /* Assign CPU affinity (Round Robin) */
+    new_task->cpu_id = g_sched.next_cpu;
+    g_sched.next_cpu = (g_sched.next_cpu + 1) % MAX_CPUS;
     
     /* Time Slice & VRuntime Init */
     if (weight == 0) {
         weight = 1;
     }
     new_task->weight = weight;
+    new_task->base_weight = weight;
     new_task->time_slice = weight * BASE_SLICE_TICKS;
-    new_task->vruntime = _get_min_vruntime(); /* Start fair */
+    
+    /* Lock the specific CPU scheduler to insert */
+    scheduler_cpu_t *ctx = &cpu_sched[new_task->cpu_id];
+    uint32_t cpu_stat = spin_lock(&ctx->lock);
+    
+    new_task->vruntime = _get_min_vruntime(ctx); /* Start fair */
     new_task->heap_index = -1;
+    new_task->total_cpu_ticks = 0;
+    new_task->last_switch_tick = 0;
 
     /* Add to ready heap immediately */
-    _heap_insert(new_task);
+    _heap_insert(ctx, new_task);
+    
+    spin_unlock(&ctx->lock, cpu_stat);
 
     /* Set stack canary at the bottom for overflow detection */
     stack_base[0] = STACK_CANARY;
 
     /* Increment active task count */
-    task_count++;
+    g_sched.count++;
 
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&g_sched.lock, stat);
 
 #if LOG_ENABLE
     logger_log("Task Create ID:%u", new_task->task_id, 0);
 #endif
+    return new_task->task_id;
+}
+
+/* Create a new task with statically allocated stack */
+int32_t task_create_static(void (*task_func)(void *), 
+                           void *arg, 
+                           void *stack_buffer, 
+                           size_t stack_size_bytes, 
+                           uint8_t weight) {
+
+    if (task_func == NULL || stack_buffer == NULL) {
+        return -1;
+    }
+
+    /* Ensure the provided stack is NOT part of the managed heap */
+    if (allocator_is_heap_pointer(stack_buffer)) {
+        return -1;
+    }
+
+    if (stack_size_bytes < STACK_MIN_SIZE_BYTES) {
+        return -1;
+    }
+
+    /* Align stack buffer to platform alignment boundary */
+    uintptr_t addr = (uintptr_t)stack_buffer;
+    uintptr_t aligned_addr = (addr + PLATFORM_STACK_ALIGNMENT - 1) & ~(PLATFORM_STACK_ALIGNMENT - 1);
+    size_t offset = aligned_addr - addr;
+    
+    /* Ensure alignment didn't shrink size below minimum */
+    if (offset >= stack_size_bytes || (stack_size_bytes - offset) < STACK_MIN_SIZE_BYTES) {
+        return -1;
+    }
+    stack_size_bytes -= offset;
+    
+    uint32_t *stack_base = (uint32_t*)aligned_addr;
+
+    uint32_t stat = spin_lock(&g_sched.lock);
+
+    if (g_sched.free_list == NULL) {
+        _task_garbage_collection_locked();
+    }
+
+    if (g_sched.free_list == NULL) {
+        spin_unlock(&g_sched.lock, stat);
+        return -1;
+    }
+    
+    task_t *new_task = g_sched.free_list;
+    g_sched.free_list = g_sched.free_list->next;
+    new_task->next = NULL;
+
+    /* Calculate Top of Stack */
+    uint32_t *stack_end = (uint32_t*)((uint8_t*)stack_base + stack_size_bytes);
+
+    /* Initialize task structure */
+    new_task->stack_ptr     = stack_base;
+    new_task->stack_size    = stack_size_bytes;
+    new_task->psp           = arch_initialize_stack(stack_end, task_func, arg, task_exit);
+    new_task->state         = TASK_READY;
+    new_task->is_idle       = 0;
+
+    new_task->task_id = 0;
+    for (uint16_t id = 1; id <= MAX_TASKS; ++id) {
+        if (!IS_ID_USED(id)) {
+            new_task->task_id = id;
+            MARK_ID_USED(id);
+            break;
+        }
+    }
+
+    if (new_task->task_id == 0) {
+        /* Return task to free list */
+        new_task->next = g_sched.free_list;
+        g_sched.free_list = new_task;
+        spin_unlock(&g_sched.lock, stat);
+        return -1;
+    }
+
+    new_task->sleep_until_tick = 0;
+    new_task->notify_val = 0;
+    new_task->notify_state = 0;
+    new_task->event_mask = 0;
+    new_task->event_flags = 0;
+    new_task->cpu_id = g_sched.next_cpu;
+    g_sched.next_cpu = (g_sched.next_cpu + 1) % MAX_CPUS;
+    
+    if (weight == 0) {
+        weight = 1;
+    }
+    new_task->weight = weight;
+    new_task->base_weight = weight;
+    new_task->time_slice = weight * BASE_SLICE_TICKS;
+    
+    scheduler_cpu_t *ctx = &cpu_sched[new_task->cpu_id];
+    uint32_t cpu_stat = spin_lock(&ctx->lock);
+    
+    new_task->vruntime = _get_min_vruntime(ctx);
+    new_task->heap_index = -1;
+    new_task->total_cpu_ticks = 0;
+    new_task->last_switch_tick = 0;
+
+    _heap_insert(ctx, new_task);
+    
+    spin_unlock(&ctx->lock, cpu_stat);
+    
+    /* Set stack canary */
+    stack_base[0] = STACK_CANARY;
+
+    g_sched.count++;
+    spin_unlock(&g_sched.lock, stat);
+
     return new_task->task_id;
 }
 
@@ -555,17 +709,19 @@ int32_t task_delete(uint16_t task_id) {
         return -1;
     }
 
+    task_t *curr = (task_t*)task_get_current();
+
     /* Check if trying to delete self */
-    if (task_current && task_current->task_id == task_id) {
+    if (curr && curr->task_id == task_id) {
         task_exit();
         return 0; /* Unreachable */
     }
 
-    uint32_t stat = spin_lock(&scheduler_lock);
+    uint32_t stat = spin_lock(&g_sched.lock);
 
     int32_t res = _task_delete_locked(task_id);
 
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&g_sched.lock, stat);
 
 #if LOG_ENABLE
     if (res == 0) logger_log("Task Delete ID:%u", task_id, 0);
@@ -575,22 +731,25 @@ int32_t task_delete(uint16_t task_id) {
 
 /* Task voluntarily exits */
 void task_exit(void) {
-    uint32_t stat = spin_lock(&scheduler_lock);
-    
-    if (task_current != NULL) {
-        if (task_current->task_id > 0 && task_current->task_id <= MAX_TASKS) {
-            MARK_ID_FREE(task_current->task_id);
-        }
-
-        task_current->state = TASK_ZOMBIE;
-        task_current->task_id = 0;
-        
-        /* Add to zombie list for GC */
-        task_current->next = zombie_list;
-        zombie_list = task_current;
+    task_t *curr = (task_t*)task_get_current();
+    if (curr == NULL) {
+        return;
     }
     
-    spin_unlock(&scheduler_lock, stat);
+    uint32_t stat = spin_lock(&g_sched.lock);
+    
+    if (curr->task_id > 0 && curr->task_id <= MAX_TASKS) {
+        MARK_ID_FREE(curr->task_id);
+    }
+
+    curr->state = TASK_ZOMBIE;
+    curr->task_id = 0;
+        
+    /* Add to zombie list for GC */
+    curr->next = g_sched.zombie_list;
+    g_sched.zombie_list = curr;
+    
+    spin_unlock(&g_sched.lock, stat);
 
     /* Yield immediately to allow scheduler to switch away */
     while(1) {
@@ -600,22 +759,32 @@ void task_exit(void) {
 
 /* Called by Platform Context Switcher to pick next task */ 
 void schedule_next_task(void) {
-    uint32_t stat = spin_lock(&scheduler_lock);
+    uint32_t cpu = arch_get_cpu_id();
+    scheduler_cpu_t *ctx = &cpu_sched[cpu];
+    
+    uint32_t stat = spin_lock(&ctx->lock);
 
-    if (task_count == 0 && idle_task == NULL) {
-        spin_unlock(&scheduler_lock, stat);
+    uint64_t now = (uint64_t)platform_get_ticks();
+
+    /* Account for the task that just ran */
+    if (ctx->curr) {
+        ctx->curr->total_cpu_ticks += (now - ctx->curr->last_switch_tick);
+    }
+
+    if (g_sched.count == 0 && ctx->idle_task == NULL) {
+        spin_unlock(&ctx->lock, stat);
         return;
     }
 
     /* Handle Current Task */
-    if (task_current && task_current->state == TASK_RUNNING) {
+    if (ctx->curr && ctx->curr->state == TASK_RUNNING) {
         /* It was running, so it yielded or was preempted. */
-        task_current->state = TASK_READY;
+        ctx->curr->state = TASK_READY;
 
-        if (!task_current->is_idle) {
+        if (!ctx->curr->is_idle) {
             /* Calculate actual ticks consumed */
-            uint32_t max_slice = task_current->weight * BASE_SLICE_TICKS;
-            uint32_t ticks_ran = max_slice - task_current->time_slice;
+            uint32_t max_slice = ctx->curr->weight * BASE_SLICE_TICKS;
+            uint32_t ticks_ran = max_slice - ctx->curr->time_slice;
             if (ticks_ran == 0) {
                 ticks_ran = 1; /* Minimum charge to prevent free yields */
             }
@@ -624,70 +793,75 @@ void schedule_next_task(void) {
              * Update vruntime:
              * vruntime += (ticks_ran * SCALER) / weight
              */
-            task_current->vruntime += (uint64_t)(ticks_ran * VRUNTIME_SCALER) / task_current->weight;
+            ctx->curr->vruntime += (uint64_t)(ticks_ran * VRUNTIME_SCALER) / ctx->curr->weight;
             
             /* Replenish Time Slice */
-            task_current->time_slice = max_slice;
+            ctx->curr->time_slice = max_slice;
 
             /* Put back into heap */
-            _heap_insert(task_current);
+            _heap_insert(ctx, ctx->curr);
         }
     }
 
     /* Pick Next Task from Heap */
-    task_t *best = _heap_pop_min();
+    task_t *best = _heap_pop_min(ctx);
     
     if (best != NULL) {
         /* Found a user task */
-        task_current = best;
-        task_current->state = TASK_RUNNING;
-        spin_unlock(&scheduler_lock, stat);
+        ctx->curr = best;
+        ctx->curr->state = TASK_RUNNING;
+        ctx->curr->last_switch_tick = now;
+        spin_unlock(&ctx->lock, stat);
         return;
     }
 
     /* If no READY user task found, schedule IDLE task */
-    if (idle_task != NULL && idle_task->state == TASK_READY) {
-        task_current = idle_task;
-        task_current->state = TASK_RUNNING;
+    if (ctx->idle_task != NULL && ctx->idle_task->state == TASK_READY) {
+        ctx->curr = ctx->idle_task;
+        ctx->curr->state = TASK_RUNNING;
+        ctx->curr->last_switch_tick = now;
 
-        spin_unlock(&scheduler_lock, stat);
+        spin_unlock(&ctx->lock, stat);
         return;
     }
 
     /* Fallback: if absolutely nothing is ready (shouldn't happen if idle exists), just stay */
-    if (task_current->state == TASK_READY || task_current->state == TASK_RUNNING) {
+    if (ctx->curr->state == TASK_READY || ctx->curr->state == TASK_RUNNING) {
         /* task_current remains the same */
-        task_current->state = TASK_RUNNING;
+        ctx->curr->state = TASK_RUNNING;
+        ctx->curr->last_switch_tick = now;
     } else {
         /* If current is blocked and no idle task, we have a critical failure */
         platform_panic();
     }
 
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&ctx->lock, stat);
 }
 
 /* Rearrange active tasks and free zombie stacks */
 void task_garbage_collection(void) {
-    uint32_t stat = spin_lock(&scheduler_lock);
+    uint32_t stat = spin_lock(&g_sched.lock);
     
     _task_garbage_collection_locked();
     
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&g_sched.lock, stat);
 }
 
 /* Check all tasks for stack overflow */
 void task_check_stack_overflow(void) {
     uint32_t current_task_overflow = 0;
-    uint32_t stat = spin_lock(&scheduler_lock);
+    uint32_t stat = spin_lock(&g_sched.lock);
 
-    task_t *t = task_list;
+    task_t *t = g_sched.pool;
+    task_t *curr = (task_t*)task_get_current();
+    
     for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
         if (t->state != TASK_UNUSED) {
-            /* Use stack_ptr (void*) and cast to check canary */
+            /* Use stack_ptr and cast to check canary */
             uint32_t *stack_base = (uint32_t*)t->stack_ptr;
 
             if (stack_base != NULL && stack_base[0] != STACK_CANARY) {
-                if (t == task_current) {
+                if (t == curr) {
 #if LOG_ENABLE
                     logger_log("Stack Overflow! ID:%u", t->task_id, 0);
 #endif
@@ -704,7 +878,7 @@ void task_check_stack_overflow(void) {
         }
     }
 
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&g_sched.lock, stat);
 
     if (current_task_overflow) {
         platform_panic();
@@ -717,15 +891,21 @@ void task_block(task_t *task) {
         return;
     }
 
-    uint32_t stat = spin_lock(&scheduler_lock);
+    uint32_t cpu = task->cpu_id;
+    if (cpu >= MAX_CPUS) {
+        return;
+    }
+    
+    uint32_t stat = spin_lock(&cpu_sched[cpu].lock);
+    
     if (task->state != TASK_UNUSED && !task->is_idle) {
         /* If it was READY, remove from heap */
         if (task->state == TASK_READY) {
-            _heap_remove(task);
+            _heap_remove(&cpu_sched[cpu], task);
         }
         task->state = TASK_BLOCKED;
     }
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&cpu_sched[cpu].lock, stat);
 }
 
 /* Unblock a task */
@@ -734,19 +914,27 @@ void task_unblock(task_t *task) {
         return;
     }
 
-    uint32_t stat = spin_lock(&scheduler_lock);
-    _unblock_task_locked(task);
-    spin_unlock(&scheduler_lock, stat);
+    uint32_t cpu = task->cpu_id;
+    if (cpu >= MAX_CPUS) {
+        return;
+    }
+
+    uint32_t stat = spin_lock(&cpu_sched[cpu].lock);
+    _unblock_task_locked(&cpu_sched[cpu], task);
+    spin_unlock(&cpu_sched[cpu].lock, stat);
 }
 
 /* Block current task */
 void task_block_current(void) {
-    uint32_t stat = spin_lock(&scheduler_lock);
-    if (task_current && task_current->state != TASK_UNUSED && !task_current->is_idle) {
+    uint32_t cpu = arch_get_cpu_id();
+    scheduler_cpu_t *ctx = &cpu_sched[cpu];
+    
+    uint32_t stat = spin_lock(&ctx->lock);
+    if (ctx->curr && ctx->curr->state != TASK_UNUSED && !ctx->curr->is_idle) {
         /* Current task is RUNNING, so it's not in the heap. Just set state. */
-        task_current->state = TASK_BLOCKED;
+        ctx->curr->state = TASK_BLOCKED;
     }
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&ctx->lock, stat);
     
     platform_yield();
 }
@@ -754,26 +942,30 @@ void task_block_current(void) {
 /* Update wake-up time and add to sleep list */
 int task_sleep_ticks(uint32_t ticks)
 {
-    if (ticks == 0 || task_current == NULL) {
+    task_t *curr = (task_t*)task_get_current();
+    if (ticks == 0 || curr == NULL) {
         return -1;
     }
 
-    uint32_t stat = spin_lock(&scheduler_lock);
+    uint32_t cpu = arch_get_cpu_id();
+    scheduler_cpu_t *ctx = &cpu_sched[cpu];
+    
+    uint32_t stat = spin_lock(&ctx->lock);
 
-    /* Remove from sleep list if already there */
-    _remove_from_sleep_list(task_current);
-
-    task_current->sleep_until_tick = (uint32_t)platform_get_ticks() + ticks;
-
-    /* Block task */
-    if (task_current->state != TASK_UNUSED && !task_current->is_idle) {
-        task_current->state = TASK_BLOCKED;
-        /* Not in heap, so no remove needed */
+    if (curr->is_idle) {
+        spin_unlock(&ctx->lock, stat);
+        return -1;
     }
 
-    _insert_into_sleep_list(task_current);
+    /* Remove from sleep list if already there */
+    _remove_from_sleep_list(ctx, curr);
 
-    spin_unlock(&scheduler_lock, stat);
+    curr->sleep_until_tick = (uint32_t)platform_get_ticks() + ticks;
+    curr->state = TASK_SLEEPING;
+
+    _insert_into_sleep_list(ctx, curr);
+
+    spin_unlock(&ctx->lock, stat);
 
     /* Yield immediately */
     platform_yield();
@@ -782,110 +974,180 @@ int task_sleep_ticks(uint32_t ticks)
 }
 
 uint32_t task_notify_wait(uint8_t clear_on_exit, uint32_t wait_ticks) {
-    uint32_t stat = spin_lock(&scheduler_lock);
+    task_t *curr = (task_t*)task_get_current();
+    if (!curr) {
+        return 0;
+    }
+
+    uint32_t cpu = arch_get_cpu_id();
+    scheduler_cpu_t *ctx = &cpu_sched[cpu];
+    
+    uint32_t stat = spin_lock(&ctx->lock);
     
     /* If no notification pending, block */
-    if (task_current->notify_state == 0) {
+    if (curr->notify_state == 0) {
         if (wait_ticks > 0) {
             /* Set wake-up time if not infinite wait */
             if (wait_ticks != UINT32_MAX) {
-                task_current->sleep_until_tick = (uint32_t)platform_get_ticks() + wait_ticks;
-                _insert_into_sleep_list(task_current);
+                curr->sleep_until_tick = (uint32_t)platform_get_ticks() + wait_ticks;
+                _insert_into_sleep_list(ctx, curr);
+                curr->state = TASK_SLEEPING;
+            } else {
+                curr->state = TASK_BLOCKED;
             }
-            task_current->state = TASK_BLOCKED;
             /* Not in heap */
         } else {
-            spin_unlock(&scheduler_lock, stat);
+            spin_unlock(&ctx->lock, stat);
             return 0;
         }
     }
     
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&ctx->lock, stat);
     
-    if (task_current->state == TASK_BLOCKED) {
+    if (curr->state == TASK_BLOCKED || curr->state == TASK_SLEEPING) {
         platform_yield();
     }
     
     /* Woke up */
-    stat = spin_lock(&scheduler_lock);
-    uint32_t val = task_current->notify_val;
+    stat = spin_lock(&ctx->lock);
+    uint32_t val = curr->notify_val;
     if (clear_on_exit) {
-        task_current->notify_state = 0;
-        task_current->notify_val = 0;
+        curr->notify_state = 0;
+        curr->notify_val = 0;
     }
     /* Clear sleep tick in case we woke up early due to notification */
     if (wait_ticks > 0 && wait_ticks != UINT32_MAX) {
-        task_current->sleep_until_tick = 0;
+        curr->sleep_until_tick = 0;
     }
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&ctx->lock, stat);
     
     return val;
 }
 
 void task_notify(uint16_t task_id, uint32_t value) {
-    uint32_t stat = spin_lock(&scheduler_lock);
+    if (task_id == 0) {
+        return;
+    }
     
-    task_t *t = task_list;
+    task_t *t = g_sched.pool;
+    task_t *target = NULL;
+    
     for (uint32_t i = 0; i < MAX_TASKS; ++i, ++t) {
-        if (t->state != TASK_UNUSED && t->task_id == task_id) {
-            t->notify_val |= value;
-            t->notify_state = 1;
-            _unblock_task_locked(t);
+        if (t->task_id == task_id) {
+            target = t;
             break;
         }
     }
-    spin_unlock(&scheduler_lock, stat);
+    
+    if (target) {
+        uint32_t cpu = target->cpu_id;
+        if (cpu >= MAX_CPUS) {
+            return;
+        }
+        
+        uint32_t stat = spin_lock(&cpu_sched[cpu].lock);
+        /* Verify ID match in case of race with deletion/creation */
+        if (target->task_id == task_id && target->state != TASK_UNUSED) {
+            target->notify_val |= value;
+            target->notify_state = 1;
+            _unblock_task_locked(&cpu_sched[cpu], target);
+        }
+        spin_unlock(&cpu_sched[cpu].lock, stat);
+    }
 }
 
 /* Process System Tick (Called by ISR) */
 uint32_t scheduler_tick(void)
 {
-    uint32_t stat = spin_lock(&scheduler_lock);
+    uint32_t cpu = arch_get_cpu_id();
+    scheduler_cpu_t *ctx = &cpu_sched[cpu];
+    
+    uint32_t stat = spin_lock(&ctx->lock);
     uint32_t need_reschedule = 0;
     
     uint32_t current_ticks = (uint32_t)platform_get_ticks();
 
-    _process_sleep_list(current_ticks);
+    _process_sleep_list(ctx, current_ticks);
 
-    /* 2. Update Time Slice for Current Task */
-    if (task_current && task_current->state == TASK_RUNNING && !task_current->is_idle) {
-        if (task_current->time_slice > 0) {
-            task_current->time_slice--;
+    /* Update Time Slice for Current Task */
+    if (ctx->curr && ctx->curr->state == TASK_RUNNING && !ctx->curr->is_idle) {
+        if (ctx->curr->time_slice > 0) {
+            ctx->curr->time_slice--;
         }
 
         /* If slice expired, trigger switch */
-        if (task_current->time_slice == 0) {
+        if (ctx->curr->time_slice == 0) {
             need_reschedule = 1;
         }
     }
 
-    /* Check if we need to preempt current task for a higher priority one (lower vruntime) */
-    uint64_t min_v = _get_min_vruntime();
-    if (task_current && task_current->vruntime > min_v) {
+    /* If idle is running and there is any READY task, we must reschedule.
+     * Otherwise idle might run forever because it doesn't consume time_slice and
+     * its vruntime may not advance. */
+    if (ctx->curr && ctx->curr->is_idle && ctx->heap_size > 0) {
         need_reschedule = 1;
+    } else {
+        /* Check if we need to preempt current task for a higher priority one (lower vruntime) */
+        uint64_t min_v = _get_min_vruntime(ctx);
+        if (ctx->curr && VRUNTIME_LT(min_v, ctx->curr->vruntime)) {
+            need_reschedule = 1;
+        }
     }
 
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&ctx->lock, stat);
     return need_reschedule;
 }
 
 /* Get the handle of the currently running task */
 void *task_get_current(void) {
-    return (void *)task_current;
+    uint32_t cpu = arch_get_cpu_id();
+    return (void *)cpu_sched[cpu].curr;
+}
+
+/* Set the currently running task */
+void task_set_current(void *task) {
+    uint32_t cpu = arch_get_cpu_id();
+    scheduler_cpu_t *ctx = &cpu_sched[cpu];
+    uint32_t stat = spin_lock(&ctx->lock);
+
+    task_t *old_task = ctx->curr;
+    task_t *new_task = (task_t*)task;
+
+    if (old_task && old_task->state == TASK_RUNNING) {
+        old_task->state = TASK_READY;
+        if (!old_task->is_idle) {
+            _heap_insert(ctx, old_task);
+        }
+    }
+
+    ctx->curr = new_task;
+
+    if (new_task) {
+        if (new_task->state == TASK_READY) {
+            _heap_remove(ctx, new_task);
+        }
+        new_task->state = TASK_RUNNING;
+    }
+    spin_unlock(&ctx->lock, stat);
 }
 
 /* Change the task state. */
 void task_set_state(task_t *t, task_state_t state) {
-    uint32_t stat = spin_lock(&scheduler_lock);
+    uint32_t cpu = t->cpu_id;
+    if (cpu >= MAX_CPUS) {
+        return;
+    }
+    
+    uint32_t stat = spin_lock(&cpu_sched[cpu].lock);
 
     /* Handle Heap Management */
     if (t->state == TASK_READY && state != TASK_READY) {
-        _heap_remove(t);
+        _heap_remove(&cpu_sched[cpu], t);
     }
     
     /* Remove if it was sleeping (regardless of target state) */
-    if (t->sleep_until_tick > 0) {
-        _remove_from_sleep_list(t);
+    if (t->state == TASK_SLEEPING) {
+        _remove_from_sleep_list(&cpu_sched[cpu], t);
         t->sleep_until_tick = 0;
     }
 
@@ -893,23 +1155,31 @@ void task_set_state(task_t *t, task_state_t state) {
     t->state = state;
     
     if (state == TASK_READY) {
-        uint64_t min_v = _get_min_vruntime();
-        if (t->vruntime < min_v) {
+        uint64_t min_v = _get_min_vruntime(&cpu_sched[cpu]);
+        if (VRUNTIME_LT(t->vruntime, min_v)) {
             t->vruntime = min_v;
         }
-        _heap_insert(t);
+        _heap_insert(&cpu_sched[cpu], t);
     } else if (state == TASK_ZOMBIE && old_state != TASK_ZOMBIE) {
+        /* Zombie management is global */
+        spin_unlock(&cpu_sched[cpu].lock, stat);
+        
+        uint32_t g_stat = spin_lock(&g_sched.lock);
+        
         /* Add to zombie list for GC */
         if (t->task_id > 0 && t->task_id <= MAX_TASKS) {
             MARK_ID_FREE(t->task_id);
         }
         t->task_id = 0;
         
-        t->next = zombie_list;
-        zombie_list = t;
+        t->next = g_sched.zombie_list;
+        g_sched.zombie_list = t;
+        
+        spin_unlock(&g_sched.lock, g_stat);
+        return;
     }
 
-    spin_unlock(&scheduler_lock, stat);
+    spin_unlock(&cpu_sched[cpu].lock, stat);
 }
 
 /* Atomically get the task state */
@@ -925,6 +1195,17 @@ uint16_t task_get_id(task_t *t) {
 /* Get the weight of a task */
 uint8_t task_get_weight(task_t *t) {
     return t->weight;
+}
+
+/* Set the weight of a task */
+void task_set_weight(task_t *t, uint8_t weight) {
+    if (t) {
+        if (weight == 0) {
+            weight = 1;
+        }
+        t->weight = weight;
+        t->base_weight = weight;
+    }
 }
 
 /* Get the remaining time slice of a task */
@@ -947,5 +1228,79 @@ task_t *scheduler_get_task_by_index(uint32_t index) {
     if (index >= MAX_TASKS) {
         return NULL;
     }
-    return &task_list[index];
+    return &g_sched.pool[index];
+}
+
+/* Get the embedded wait node */
+wait_node_t* task_get_wait_node(task_t *task) {
+    return &task->wait_node;
+}
+
+/* Set notification value */
+void task_set_notify_val(task_t *t, uint32_t val) {
+    if (t) t->notify_val = val;
+}
+
+/* Get notification value */
+uint32_t task_get_notify_val(task_t *t) {
+    return t ? t->notify_val : 0;
+}
+
+/* Set notification state */
+void task_set_notify_state(task_t *t, uint8_t state) {
+    if (t) {
+        t->notify_state = state;
+    }
+}
+
+/* Get notification state */
+uint8_t task_get_notify_state(task_t *t) {
+    return t ? t->notify_state : 0;
+}
+
+/* Get total CPU ticks consumed by task */
+uint64_t task_get_cpu_ticks(task_t *t) {
+    return t ? t->total_cpu_ticks : 0;
+}
+
+/* Get the base weight of a task */
+uint8_t task_get_base_weight(task_t *t) {
+    return t ? t->base_weight : 0;
+}
+
+/* Restore task weight to its base weight */
+void task_restore_base_weight(task_t *t) {
+    if (t) {
+        t->weight = t->base_weight;
+    }
+}
+
+/* Temporarily boost task weight (for Priority Inheritance) */
+void task_boost_weight(task_t *t, uint8_t weight) {
+    if (t) {
+        if (weight == 0) {
+            weight = 1;
+        }
+        if (weight > t->weight) {
+            t->weight = weight;
+        }
+    }
+}
+
+/* Set event group wait parameters */
+void task_set_event_wait(task_t *t, uint32_t bits, uint8_t flags) {
+    if (t) {
+        t->event_mask = bits;
+        t->event_flags = flags;
+    }
+}
+
+/* Get event group wait bits */
+uint32_t task_get_event_bits(task_t *t) {
+    return t ? t->event_mask : 0;
+}
+
+/* Get/Set event group flags */
+uint8_t task_get_event_flags(task_t *t) {
+    return t ? t->event_flags : 0;
 }
