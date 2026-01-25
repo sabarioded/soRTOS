@@ -150,9 +150,13 @@ void task_notify(uint16_t task_id, uint32_t value);
 void *task_get_current(void);
 
 /**
+ * @brief Set the currently running task
+ * @param task Pointer to the task.
+ */
+void task_set_current(void *task);
+
+/**
  * @brief Change the state of a specific task.
- * @warning This function does NOT lock interrupts. The caller must ensure 
- * thread safety before calling.
  * @param t Pointer to the task.
  * @param state New state to set.
  */
