@@ -8,36 +8,6 @@
 #include <stdio.h>
 #include "test_common.h"
 
-/* 
- * We redefine the internal queue structure here to access private members.
- * This allows us to clear the wait lists in tearDown(), preventing
- * queue_delete() from accessing invalid stack memory caused by longjmp().
- */
-typedef struct wait_node {
-    void *task;
-    struct wait_node *next;
-} wait_node_t;
-
-struct queue {
-    void *buffer;
-    size_t item_size;
-    size_t capacity;
-    size_t count;
-    size_t head;
-    size_t tail;
-    
-    wait_node_t *rx_wait_head;
-    wait_node_t *rx_wait_tail;
-    
-    wait_node_t *tx_wait_head;
-    wait_node_t *tx_wait_tail;
-
-    queue_notify_cb_t callback;
-    void *callback_arg;
-
-    spinlock_t lock;
-};
-
 
 static queue_t *q;
 static uint8_t heap[4096];
@@ -60,17 +30,6 @@ static void setUp_queue(void) {
 }
 
 static void tearDown_queue(void) {
-    /* 
-     * Manually clear the wait lists. The nodes they point to were allocated 
-     * on the stack of functions that have now returned (via longjmp), 
-     * so the memory is invalid. 
-     */
-    if (q) {
-        q->rx_wait_head = NULL;
-        q->rx_wait_tail = NULL;
-        q->tx_wait_head = NULL;
-        q->tx_wait_tail = NULL;
-    }
     queue_delete(q);
 }
 
