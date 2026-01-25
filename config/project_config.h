@@ -20,8 +20,17 @@
 /* ============================================================================
    Scheduler Configuration
    ============================================================================ */
+#define MAX_CPUS               1      /* Maximum number of CPUs */
 #define MAX_TASKS              58     /* Maximum number of tasks */
 #define SYSTICK_FREQ_HZ        1000   /* SysTick interrupt frequency (1 kHz = 1ms tick) */
+#define BASE_SLICE_TICKS       2      /* Base ticks per weight unit */
+#define VRUNTIME_SCALER        1000   /* Scaling factor for vruntime calc */
+
+/* Task Weights (Higher weight = More CPU time) */
+#define TASK_WEIGHT_IDLE        1
+#define TASK_WEIGHT_LOW         10
+#define TASK_WEIGHT_NORMAL      20
+#define TASK_WEIGHT_HIGH        50
 
 /* Stack overflow detection */
 #define STACK_CANARY           0xDEADBEEF  /* Magic value at stack bottom */
