@@ -74,6 +74,15 @@ static inline uint32_t arch_test_and_set(volatile uint32_t *ptr) {
 }
 
 /**
+ * @brief Get the current CPU ID.
+ * 
+ * @return Always 0 for single-threaded host simulation.
+ */
+static inline uint32_t arch_get_cpu_id(void) {
+    return 0;
+}
+
+/**
  * @brief Reset the processor.
  * 
  * On host, this exits the process.

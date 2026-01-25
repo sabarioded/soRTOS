@@ -45,12 +45,12 @@ typedef struct BlockHeader {
 #define BLOCK_MIN_SIZE      (sizeof(block_header_t))
 
 typedef struct {
+    /* Array of free lists */
+    block_header_t* blocks[FL_INDEX_MAX][SL_INDEX_COUNT];
+
     /* Bitmaps to quickly find non-empty free lists */
     uint32_t fl_bitmap;
     uint32_t sl_bitmap[FL_INDEX_MAX];
-
-    /* Array of free lists */
-    block_header_t* blocks[FL_INDEX_MAX][SL_INDEX_COUNT];
 } control_t;
 
 static control_t control;
@@ -457,6 +457,14 @@ size_t allocator_get_free_size(void) {
 /* Get the number of free blocks (fragments) */
 size_t allocator_get_fragment_count(void) {
     return free_blocks;
+}
+
+/* Check if a pointer belongs to the managed heap */
+int allocator_is_heap_pointer(void *ptr) {
+    if (ptr >= heap_start_ptr && ptr < heap_end_ptr) {
+        return 1;
+    }
+    return 0;
 }
 
 /* Populate the heap statistics structure */

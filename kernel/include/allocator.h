@@ -63,6 +63,13 @@ size_t allocator_get_free_size(void);
 size_t allocator_get_fragment_count(void);
 
 /**
+ * @brief Check if a pointer falls within the managed heap range.
+ * @param ptr Pointer to check.
+ * @return 1 if pointer is in heap, 0 otherwise.
+ */
+int allocator_is_heap_pointer(void *ptr);
+
+/**
  * @brief  Populates the stats structure with current heap state.
  * @param  stats Pointer to a heap_stats_t struct to fill.
  * @return 0 on success, -1 if heap not initialized or stats is NULL.
