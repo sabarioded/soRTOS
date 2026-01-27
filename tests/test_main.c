@@ -1,7 +1,3 @@
-/* 
- * Main Test Runner
- * Aggregates and executes all unit test suites for the kernel.
- */
 #include "unity.h"
 
 /* External test suite runners */
@@ -13,6 +9,9 @@ extern void run_allocator_tests(void);
 extern void run_timer_tests(void);
 extern void run_logger_tests(void);
 extern void run_utils_tests(void);
+extern void run_cli_tests(void);
+extern void run_event_group_tests(void);
+extern void run_mempool_tests(void);
 
 /* Main entry point for the unit test executable */
 int main(void) {
@@ -27,6 +26,9 @@ int main(void) {
     run_timer_tests();
     run_logger_tests();
     run_utils_tests();
+    run_cli_tests();
+    run_event_group_tests();
+    run_mempool_tests();
 
     /* Return failure count (0 = success) */
     return UNITY_END();
