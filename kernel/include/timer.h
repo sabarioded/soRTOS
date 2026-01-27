@@ -4,23 +4,17 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef void (*timer_callback_t)(void *arg);
 
-typedef struct sw_timer {
-    const char *name;
-    timer_callback_t callback;
-    void *arg;
-    
-    uint32_t period_ticks;
-    uint32_t expiry_tick;
-    uint8_t auto_reload;
-    uint8_t active;
-    
-    struct sw_timer *next; /* For internal linked list */
-} sw_timer_t;
+typedef struct sw_timer sw_timer_t;
 
 /**
  * @brief Initialize the software timer subsystem.
+ * 
  * Creates the daemon task that manages timers.
  */
 void timer_service_init(void);
@@ -54,12 +48,39 @@ int timer_stop(sw_timer_t *timer);
 
 /**
  * @brief Delete a timer and free memory.
+ * @param timer Timer handle.
  */
 void timer_delete(sw_timer_t *timer);
 
-#ifdef UNIT_TESTING
-/** @brief Helper to manually trigger timer checks in tests */
-void timer_test_run_callbacks(void);
+/**
+ * @brief Check for expired timers and execute callbacks.
+ * @return Number of ticks until the next timer expires, or UINT32_MAX if none.
+ */
+uint32_t timer_check_expiries(void);
+
+/**
+ * @brief Get the debug name of the timer.
+ * @param timer Timer handle.
+ * @return Name string.
+ */
+const char* timer_get_name(sw_timer_t *timer);
+
+/**
+ * @brief Get the period of the timer.
+ * @param timer Timer handle.
+ * @return Period in ticks.
+ */
+uint32_t timer_get_period(sw_timer_t *timer);
+
+/**
+ * @brief Check if the timer is currently active.
+ * @param timer Timer handle.
+ * @return 1 if active, 0 if stopped.
+ */
+uint8_t timer_is_active(sw_timer_t *timer);
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif /* TIMER_H */
