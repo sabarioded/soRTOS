@@ -123,6 +123,35 @@ void test_sem_broadcast_wakes_all(void) {
     TEST_ASSERT_EQUAL(2, s.count); /* Should increment for each woken task */
 }
 
+/* Verify that tasks are woken up in FIFO order */
+void test_sem_fifo_wake_order(void) {
+    so_sem_t s;
+    so_sem_init(&s, 0, 5);
+    
+    /* Manually queue T1 then T2 */
+    wait_node_t *n1 = task_get_wait_node(t1);
+    wait_node_t *n2 = task_get_wait_node(t2);
+    
+    n1->task = t1; n1->next = n2;
+    n2->task = t2; n2->next = NULL;
+    
+    s.wait_head = n1;
+    s.wait_tail = n2;
+    
+    task_set_state(t1, TASK_BLOCKED);
+    task_set_state(t2, TASK_BLOCKED);
+    
+    /* First signal should wake T1 (Head) */
+    so_sem_signal(&s);
+    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t1));
+    TEST_ASSERT_EQUAL(TASK_BLOCKED, task_get_state_atomic(t2));
+    
+    /* Second signal should wake T2 */
+    so_sem_signal(&s);
+    TEST_ASSERT_EQUAL(TASK_READY, task_get_state_atomic(t2));
+    TEST_ASSERT_NULL(s.wait_head);
+}
+
 void run_semaphore_tests(void) {
     printf("\n=== Starting Semaphore Tests ===\n");
 
@@ -136,6 +165,7 @@ void run_semaphore_tests(void) {
     RUN_TEST(test_sem_signal_increments_count);
     RUN_TEST(test_sem_signal_wakes_task);
     RUN_TEST(test_sem_broadcast_wakes_all);
+    RUN_TEST(test_sem_fifo_wake_order);
     
     printf("=== Semaphore Tests Complete ===\n");
 }
