@@ -3,17 +3,23 @@
 
 #include <stdint.h>
 #include "project_config.h"
+#include "spinlock.h"
+#include "scheduler.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef struct {
-    volatile uint32_t count;    /**< Current number of available resources */
-    uint32_t max_count;         /**< Maximum number of resources (1 for binary sem) */
+    volatile uint32_t count;    /* Current number of available resources */
+    uint32_t max_count;         /* Maximum number of resources */
     
-    /* Wait queue */
-    void *wait_queue[MAX_TASKS]; /**< Circular buffer of tasks waiting for this semaphore */
-    uint8_t head;                /**< Index of the next task to wake up */
-    uint8_t tail;                /**< Index where the next blocked task will be placed */
-    uint8_t q_count;             /**< Number of tasks currently waiting */
-} sem_t;
+    /* Linked list for waiting tasks */
+    wait_node_t *wait_head;
+    wait_node_t *wait_tail;
+    
+    spinlock_t lock;
+} so_sem_t;
 
 /** 
  * @brief Initialize a semaphore.
@@ -22,7 +28,7 @@ typedef struct {
  * @param initial_count Initial number of available resources.
  * @param max_count Maximum limit for the count (use 1 for binary semaphore).
  */
-void sem_init(sem_t *s, uint32_t initial_count, uint32_t max_count);
+void so_sem_init(so_sem_t *s, uint32_t initial_count, uint32_t max_count);
 
 /** 
  * @brief Wait (Take) for a semaphore token.
@@ -33,7 +39,7 @@ void sem_init(sem_t *s, uint32_t initial_count, uint32_t max_count);
  * 
  * @param s Pointer to the semaphore.
  */
-void sem_wait(sem_t *s);
+void so_sem_wait(so_sem_t *s);
 
 /** 
  * @brief Signal (Give) a semaphore token.
@@ -43,7 +49,7 @@ void sem_wait(sem_t *s);
  * 
  * @param s Pointer to the semaphore.
  */
-void sem_signal(sem_t *s);
+void so_sem_signal(so_sem_t *s);
 
 /** 
  * @brief Broadcast the semaphore to all waiting tasks.
@@ -55,6 +61,10 @@ void sem_signal(sem_t *s);
  * 
  * @param s Pointer to the semaphore.
  */
-void sem_broadcast(sem_t *s);
+void so_sem_broadcast(so_sem_t *s);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SEMAPHORE_H */
