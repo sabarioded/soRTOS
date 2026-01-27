@@ -2,81 +2,139 @@
 #include "scheduler.h"
 #include "arch_ops.h"
 #include "platform.h"
+#include "spinlock.h"
 #include <stddef.h>
 
-/* Initialize a mutex */
-void mutex_init(mutex_t *m) {
-    m->locked = 0;
-    m->owner = NULL;
-    m->head = 0;
-    m->tail = 0;
-    m->count = 0;
-    for(int i = 0; i < MAX_TASKS; i++) {
-        m->wait_queue[i] = NULL;
+/* Add a node to the linked list tail */
+static void _add_to_wait_list(wait_node_t **head, wait_node_t **tail, wait_node_t *node) {
+    node->next = NULL;
+    if (*tail) {
+        (*tail)->next = node;
+    } else {
+        *head = node;
     }
+    *tail = node;
 }
 
-/* Acquire lock. If busy, block current task and yield. */
+/* Remove and return the first node from the linked list */
+static void* _pop_from_wait_list(wait_node_t **head, wait_node_t **tail) {
+    if (!*head) {
+        return NULL;
+    }
+    
+    wait_node_t *node = *head;
+    void *task = node->task;
+    
+    *head = node->next;
+    if (*head == NULL) {
+        *tail = NULL;
+    }
+    return task;
+}
+
+/* Find highest weight among waiting tasks */
+static uint8_t _get_max_waiter_weight(wait_node_t *head) {
+    uint8_t max_weight = 0;
+    wait_node_t *curr = head;
+    
+    while (curr) {
+        task_t *task = (task_t*)curr->task;
+        uint8_t w = task_get_weight(task);
+        if (w > max_weight) {
+            max_weight = w;
+        }
+        curr = curr->next;
+    }
+    return max_weight;
+}
+
+/* Initialize a mutex structure */
+void mutex_init(mutex_t *m) {
+    spinlock_init(&m->lock);
+    m->owner = NULL;
+    m->wait_head = NULL;
+    m->wait_tail = NULL;
+}
+
+/* Acquire the lock. If busy, block current task and yield. */
 void mutex_lock(mutex_t *m) {
+    task_t *current_task = (task_t*)task_get_current();
+    if (!current_task) {
+        return;
+    }
+
+    /* Reuse the wait node since we can't be blocked on a queue and mutex simultaneously */
+    wait_node_t *node = task_get_wait_node(current_task);
+    node->task = current_task;
+    node->next = NULL;
+
     while(1) {
-        uint32_t flag = arch_irq_lock();
+        uint32_t flags = spin_lock(&m->lock);
         
-        void* current_task = task_get_current();
-        
-        /* Check if we already own it (Direct Handoff) */
-        if (m->locked && m->owner == current_task) {
-            arch_irq_unlock(flag);
+        /* Check if we already own it (Recursive/Re-entry) */
+        if (m->owner == current_task) {
+            spin_unlock(&m->lock, flags);
             return;
         }
         
-        /* If unlocked, grab it */
-        if (m->locked == 0) {
-            m->locked = 1;
+        /* If unlocked, take ownership */
+        if (m->owner == NULL) {
             m->owner = current_task;
-            arch_irq_unlock(flag);
+            spin_unlock(&m->lock, flags);
             return;
+        }
+
+        /* Boost owner if we have higher priority */
+        task_t *owner = (task_t*)m->owner;
+        uint8_t curr_w = task_get_weight(current_task);
+        if (curr_w > task_get_weight(owner)) {
+            task_boost_weight(owner, curr_w);
         }
 
         /* If locked, add to wait queue */
-        if (m->count < MAX_TASKS) {
-            m->wait_queue[m->tail] = current_task;
-            m->tail = (m->tail + 1) % MAX_TASKS;
-            m->count++;
+        _add_to_wait_list(&m->wait_head, &m->wait_tail, node);
+        task_set_state(current_task, TASK_BLOCKED); 
 
-            task_set_state((task_t*)current_task, TASK_BLOCKED); 
-        }
-
-        arch_irq_unlock(flag);
+        spin_unlock(&m->lock, flags);
         
         /* Yield CPU to allow other tasks to run */
         platform_yield();
     }
 }
 
-/* Release lock and wake up one waiting task */
+/* Release the lock and wake up one waiting task */
 void mutex_unlock(mutex_t *m) {
-    uint32_t flag = arch_irq_lock();
+    uint32_t flags = spin_lock(&m->lock);
 
     /* Only the owner can unlock */
-    if(m->owner != task_get_current()) {
-        arch_irq_unlock(flag);
+    task_t *current = (task_t*)task_get_current();
+    if(m->owner != current) {
+        spin_unlock(&m->lock, flags);
         return;
     }
 
-    /* If tasks are waiting, perform Direct Handoff */
-    if (m->count > 0) {
-        void *next_task = m->wait_queue[m->head];
-        m->head = (m->head + 1) % MAX_TASKS;
-        m->count--;
+    /* Restore original priority */
+    task_restore_base_weight(current);
 
-        /* Pass ownership directly. Lock remains 1. */
-        m->owner = next_task;
-        task_set_state((task_t*)next_task, TASK_READY);
+    /* If tasks are waiting, perform direct handoff */
+    void *next_task = _pop_from_wait_list(&m->wait_head, &m->wait_tail);
+    if (next_task) {
+        task_t *next = (task_t*)next_task;
+        
+        /* Pass ownership directly */
+        m->owner = next;
+        
+        /* Check if new owner needs priority boost from remaining waiters */
+        uint8_t max_waiter = _get_max_waiter_weight(m->wait_head);
+        if (max_waiter > task_get_weight(next)) {
+            task_boost_weight(next, max_waiter);
+        }
+        
+        task_unblock(next);
     } else {
-        /* No one waiting, release the lock */
-        m->locked = 0;
+        /* No one waiting, clear ownership */
         m->owner = NULL;
     }
 
-    arch_irq_unlock(flag);
+    spin_unlock(&m->lock, flags);
 }
