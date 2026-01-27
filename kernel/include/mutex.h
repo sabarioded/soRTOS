@@ -2,26 +2,39 @@
 #define MUTEX_H
 
 #include <stdint.h>
-#include "project_config.h" /* For MAX_TASKS */
+#include "project_config.h"
+#include "spinlock.h"
+#include "scheduler.h"
 
 typedef struct {
-    volatile uint8_t locked;
-    void *owner;                /* Task holding the lock */
+    spinlock_t lock;
+    void *owner; /* Task holding the lock */
     
-    /* Simple circular buffer for waiting tasks */
-    void *wait_queue[MAX_TASKS];
-    uint8_t head;
-    uint8_t tail;
-    uint8_t count;
+    /* Linked list for waiting tasks */
+    wait_node_t *wait_head;
+    wait_node_t *wait_tail;
 } mutex_t;
 
-/** @brief Initialize a mutex */
+/**
+ * @brief Initialize a mutex.
+ * @param m Pointer to the mutex structure.
+ */
 void mutex_init(mutex_t *m);
 
-/** @brief Acquire the lock. Blocks if already locked. */
+/**
+ * @brief Acquire the lock.
+ * 
+ * Blocks the current task if the mutex is already locked by another task.
+ * @param m Pointer to the mutex structure.
+ */
 void mutex_lock(mutex_t *m);
 
-/** @brief Release the lock. Wakes up the next waiting task. */
+/**
+ * @brief Release the lock.
+ * 
+ * Wakes up the next waiting task (if any).
+ * @param m Pointer to the mutex structure.
+ */
 void mutex_unlock(mutex_t *m);
 
 #endif /* MUTEX_H */
