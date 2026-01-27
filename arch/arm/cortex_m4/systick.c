@@ -53,10 +53,10 @@ void SysTick_Handler(void)
 {
     systick_ticks++;
 
-    /* Wake any tasks that have finished sleeping */
-    scheduler_wake_sleeping_tasks();
-
-    arch_yield(); /* trigger context switch */
+    /* Process scheduler logic */
+    if (scheduler_tick()) {
+        arch_yield(); /* trigger context switch */
+    }
 }
 
 
