@@ -48,13 +48,13 @@ static void cli_fmt_int(char *buff,
                         int base, 
                         int neg,
                         int left_align) {
-    char digits[12];
+    char digits[24];
     int i = 0;
     do {
         int d = val % base;
         digits[i++] = (d < 10) ? ('0' + d) : ('a' + d - 10);
         val /= base;
-    } while (val > 0 && i < 12);
+    } while (val > 0 && i < (int)sizeof(digits));
     
     int actual_len = i + (neg ? 1 : 0);
     int padding = width - actual_len;
