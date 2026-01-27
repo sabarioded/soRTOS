@@ -49,7 +49,7 @@ static uint8_t _get_max_waiter_weight(wait_node_t *head) {
 }
 
 /* Initialize a mutex structure */
-void mutex_init(mutex_t *m) {
+void so_mutex_init(so_mutex_t *m) {
     spinlock_init(&m->lock);
     m->owner = NULL;
     m->wait_head = NULL;
@@ -57,7 +57,7 @@ void mutex_init(mutex_t *m) {
 }
 
 /* Acquire the lock. If busy, block current task and yield. */
-void mutex_lock(mutex_t *m) {
+void so_mutex_lock(so_mutex_t *m) {
     task_t *current_task = (task_t*)task_get_current();
     if (!current_task) {
         return;
@@ -103,7 +103,7 @@ void mutex_lock(mutex_t *m) {
 }
 
 /* Release the lock and wake up one waiting task */
-void mutex_unlock(mutex_t *m) {
+void so_mutex_unlock(so_mutex_t *m) {
     uint32_t flags = spin_lock(&m->lock);
 
     /* Only the owner can unlock */

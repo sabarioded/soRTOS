@@ -42,8 +42,8 @@ static void tearDown_local(void) {
 
 /* Verify mutex initialization state */
 void test_mutex_init(void) {
-    mutex_t m;
-    mutex_init(&m);
+    so_mutex_t m;
+    so_mutex_init(&m);
     
     TEST_ASSERT_NULL(m.owner);
     TEST_ASSERT_NULL(m.wait_head);
@@ -52,10 +52,10 @@ void test_mutex_init(void) {
 
 /* Verify successful lock acquisition by a task */
 void test_mutex_lock_success(void) {
-    mutex_t m;
-    mutex_init(&m);
+    so_mutex_t m;
+    so_mutex_init(&m);
     
-    mutex_lock(&m);
+    so_mutex_lock(&m);
     
     TEST_ASSERT_EQUAL_PTR(t1, m.owner);
     TEST_ASSERT_EQUAL(0, mock_yield_count); /* Should not yield */
@@ -63,12 +63,12 @@ void test_mutex_lock_success(void) {
 
 /* Verify recursive locking behavior (owner stays the same) */
 void test_mutex_lock_recursive_handoff(void) {
-    mutex_t m;
-    mutex_init(&m);
+    so_mutex_t m;
+    so_mutex_init(&m);
     
-    mutex_lock(&m);
+    so_mutex_lock(&m);
     /* Lock again (Recursive check) */
-    mutex_lock(&m);
+    so_mutex_lock(&m);
     
     TEST_ASSERT_EQUAL_PTR(t1, m.owner);
     TEST_ASSERT_EQUAL(0, mock_yield_count);
@@ -76,18 +76,18 @@ void test_mutex_lock_recursive_handoff(void) {
 
 /* Verify that a second task blocks when trying to acquire a locked mutex */
 void test_mutex_contention_blocking(void) {
-    mutex_t m;
-    mutex_init(&m);
+    so_mutex_t m;
+    so_mutex_init(&m);
     
     /* Task 0 takes lock */
-    mutex_lock(&m);
+    so_mutex_lock(&m);
     
     /* Switch context to Task 1 */
     task_set_current(t2);
     
     /* Task 1 tries to lock. Should block and yield. */
     if (setjmp(yield_jump) == 0) {
-        mutex_lock(&m); 
+        so_mutex_lock(&m); 
         TEST_FAIL_MESSAGE("mutex_lock should have yielded/blocked");
     }
     
@@ -100,8 +100,8 @@ void test_mutex_contention_blocking(void) {
 
 /* Verify that unlocking hands off ownership to the waiting task */
 void test_mutex_unlock_handoff(void) {
-    mutex_t m;
-    mutex_init(&m);
+    so_mutex_t m;
+    so_mutex_init(&m);
     
     /* Setup: Task 0 owns lock, Task 1 is waiting */
     m.owner = t1;
@@ -114,7 +114,7 @@ void test_mutex_unlock_handoff(void) {
     task_set_state(t2, TASK_BLOCKED);
     
     /* Task 0 unlocks */
-    mutex_unlock(&m);
+    so_mutex_unlock(&m);
     
     /* Verify Handoff */
     TEST_ASSERT_EQUAL_PTR(t2, m.owner); /* Owner is now T2 */
@@ -124,8 +124,8 @@ void test_mutex_unlock_handoff(void) {
 
 /* Verify Priority Inheritance */
 void test_mutex_priority_inheritance(void) {
-    mutex_t m;
-    mutex_init(&m);
+    so_mutex_t m;
+    so_mutex_init(&m);
     
     /* Set T1 to LOW priority, T2 to HIGH priority */
     task_set_weight(t1, TASK_WEIGHT_LOW);
@@ -133,13 +133,13 @@ void test_mutex_priority_inheritance(void) {
     
     /* T1 takes the lock */
     task_set_current(t1);
-    mutex_lock(&m);
+    so_mutex_lock(&m);
     TEST_ASSERT_EQUAL(TASK_WEIGHT_LOW, task_get_weight(t1));
     
     /* T2 tries to take lock and blocks */
     task_set_current(t2);
     if (setjmp(yield_jump) == 0) {
-        mutex_lock(&m);
+        so_mutex_lock(&m);
         TEST_FAIL_MESSAGE("Should have yielded");
     }
     
@@ -148,7 +148,7 @@ void test_mutex_priority_inheritance(void) {
     
     /* T1 runs again and unlocks */
     task_set_current(t1);
-    mutex_unlock(&m);
+    so_mutex_unlock(&m);
     
     /* Verify T1 returned to LOW priority */
     TEST_ASSERT_EQUAL(TASK_WEIGHT_LOW, task_get_weight(t1));
@@ -159,8 +159,8 @@ void test_mutex_priority_inheritance(void) {
 
 /* Verify Chained Priority Inheritance (New Owner Boost) */
 void test_mutex_chained_priority_inheritance(void) {
-    mutex_t m;
-    mutex_init(&m);
+    so_mutex_t m;
+    so_mutex_init(&m);
     
     /* Set weights: T1 < T2 < T3 */
     task_set_weight(t1, TASK_WEIGHT_LOW);
@@ -169,12 +169,12 @@ void test_mutex_chained_priority_inheritance(void) {
     
     /* 1. T1 takes lock */
     task_set_current(t1);
-    mutex_lock(&m);
+    so_mutex_lock(&m);
     
     /* 2. T2 tries to lock -> Blocks. T1 boosted to NORMAL. */
     task_set_current(t2);
     if (setjmp(yield_jump) == 0) {
-        mutex_lock(&m);
+        so_mutex_lock(&m);
         TEST_FAIL_MESSAGE("T2 should have yielded");
     }
     TEST_ASSERT_EQUAL(TASK_WEIGHT_NORMAL, task_get_weight(t1));
@@ -182,7 +182,7 @@ void test_mutex_chained_priority_inheritance(void) {
     /* 3. T3 tries to lock -> Blocks. T1 boosted to HIGH. */
     task_set_current(t3);
     if (setjmp(yield_jump) == 0) {
-        mutex_lock(&m);
+        so_mutex_lock(&m);
         TEST_FAIL_MESSAGE("T3 should have yielded");
     }
     TEST_ASSERT_EQUAL(TASK_WEIGHT_HIGH, task_get_weight(t1));
@@ -193,7 +193,7 @@ void test_mutex_chained_priority_inheritance(void) {
      * T2 sees T3 (HIGH) waiting. T2 boosted to HIGH.
      */
     task_set_current(t1);
-    mutex_unlock(&m);
+    so_mutex_unlock(&m);
     
     TEST_ASSERT_EQUAL(TASK_WEIGHT_LOW, task_get_weight(t1));
     TEST_ASSERT_EQUAL_PTR(t2, m.owner);

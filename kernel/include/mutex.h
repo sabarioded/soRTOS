@@ -13,13 +13,13 @@ typedef struct {
     /* Linked list for waiting tasks */
     wait_node_t *wait_head;
     wait_node_t *wait_tail;
-} mutex_t;
+} so_mutex_t;
 
 /**
  * @brief Initialize a mutex.
  * @param m Pointer to the mutex structure.
  */
-void mutex_init(mutex_t *m);
+void so_mutex_init(so_mutex_t *m);
 
 /**
  * @brief Acquire the lock.
@@ -27,7 +27,7 @@ void mutex_init(mutex_t *m);
  * Blocks the current task if the mutex is already locked by another task.
  * @param m Pointer to the mutex structure.
  */
-void mutex_lock(mutex_t *m);
+void so_mutex_lock(so_mutex_t *m);
 
 /**
  * @brief Release the lock.
@@ -35,6 +35,6 @@ void mutex_lock(mutex_t *m);
  * Wakes up the next waiting task (if any).
  * @param m Pointer to the mutex structure.
  */
-void mutex_unlock(mutex_t *m);
+void so_mutex_unlock(so_mutex_t *m);
 
 #endif /* MUTEX_H */
