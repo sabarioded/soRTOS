@@ -17,6 +17,7 @@ static int cmd_kill_handler(int argc, char **argv);
 static int cmd_reboot_handler(int argc, char **argv);
 static int cmd_blink_handler(int argc, char **argv);
 static int cmd_logger_handler(int argc, char **argv);
+static int cmd_top_handler(int argc, char **argv);
 
 static int cmd_heap_test_handler(int argc, char **argv);
 /* Pseudo-random number generator for stress testing */
@@ -93,6 +94,12 @@ static const cli_command_t logger_cmd = {
     .handler = cmd_logger_handler
 };
 
+static const cli_command_t top_cmd = {
+    .name = "top",
+    .help = "Show CPU usage per task",
+    .handler = cmd_top_handler
+};
+
 static const cli_command_t heap_test_cmd = {
     .name = "heaptest",
     .help = "Stress test heap: heaptest <basic|frag|stress> [size]",
@@ -153,6 +160,7 @@ static int cmd_task_list_handler(int argc, char **argv)
                 case TASK_READY:    state_str = "READY"; break;
                 case TASK_RUNNING:  state_str = "RUNNING"; break;
                 case TASK_BLOCKED:  state_str = "BLOCKED"; break;
+                case TASK_SLEEPING: state_str = "SLEEPING"; break;
                 case TASK_ZOMBIE:   state_str = "ZOMBIE"; break;
                 default:            state_str = "UNKNOWN"; break;
             }
@@ -161,7 +169,7 @@ static int cmd_task_list_handler(int argc, char **argv)
             if (sp != NULL) {
                 cli_printf("%u    %u     %-9s  %x\r\n", task_get_id(t), task_get_weight(t), state_str, (uintptr_t)sp);
             } else {
-                cli_printf("Error loacting memory");
+                cli_printf("Error locating memory");
             }
             count++;
         }
@@ -206,14 +214,12 @@ static int cmd_kill_handler(int argc, char **argv) {
         return -1;
     }
 
-    uint16_t task_id = (uint16_t)atoi(argv[1]);
+    uint16_t task_id = (uint16_t)utils_atoi(argv[1]);
     int32_t result = task_delete(task_id);
 
     /* 2. User Feedback */
-    if (result == TASK_DELETE_SUCCESS) {
+    if (result == 0) {
         cli_printf("Task %u killed.\r\n", task_id);
-    } else if (result == TASK_DELETE_TASK_NOT_FOUND) {
-        cli_printf("Error: Task %u not found.\r\n", task_id);
     } else {
         cli_printf("Error: Could not kill task %u (Code %d).\r\n", task_id, result);
     }
@@ -258,7 +264,7 @@ static void task_event_consumer(void *arg) {
     
     while (1) {
         /* Block until an event arrives */
-        if (queue_receive(event_queue, &evt) == 0) {
+        if (queue_pop(event_queue, &evt) == 0) {
             cli_printf("[Event] Button %s at %u ms\r\n", 
                        evt.type ? "PRESSED" : "RELEASED", 
                        (unsigned int)evt.timestamp);
@@ -280,7 +286,7 @@ static void task_button_poll(void *arg) {
             evt.timestamp = (uint32_t)platform_get_ticks();
             
             /* Send to queue. Blocks if queue is full. */
-            queue_send(event_queue, &evt);
+            queue_push(event_queue, &evt);
             
             prev_btn = btn;
         }
@@ -311,6 +317,30 @@ static int cmd_logger_handler(int argc, char **argv) {
     return 0;
 }
 
+static int cmd_top_handler(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint64_t total_uptime = (uint64_t)platform_get_ticks();
+    
+    cli_printf("Task CPU Usage:\r\n");
+    cli_printf("ID   Usage\r\n");
+    cli_printf("---  -----\r\n");
+
+    for (uint32_t i = 0; i < MAX_TASKS; i++) {
+        task_t *t = scheduler_get_task_by_index(i);
+        if (task_get_state_atomic(t) != TASK_UNUSED) {
+            uint64_t task_ticks = task_get_cpu_ticks(t);
+            
+            uint32_t percent = 0;
+            if (total_uptime > 0) {
+                percent = (uint32_t)((task_ticks * 100) / total_uptime);
+            }
+            
+            cli_printf("%u    %u%%\r\n", task_get_id(t), percent);
+        }
+    }
+    return 0;
+}
+
 static int cmd_heap_test_handler(int argc, char **argv) {
     if (argc < 2) {
         cli_printf("Usage: heaptest <mode> [size]\r\n");
@@ -329,9 +359,9 @@ static int cmd_heap_test_handler(int argc, char **argv) {
     size_t baseline_blocks = base_stats.allocated_blocks;
 
     /* Basic test: Allocate, verify pattern, realloc, and free */
-    if (strcmp(mode, "basic") == 0) {
+    if (utils_strcmp(mode, "basic") == 0) {
         if (argc < 3) { cli_printf("Size required.\r\n"); return -1; }
-        size_t size = (size_t)atoi(argv[2]);
+        size_t size = (size_t)utils_atoi(argv[2]);
         if (size == 0) {
              cli_printf("Invalid size (0 or not a number): %s\r\n", argv[2]);
              return -1;
@@ -371,7 +401,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
     }
 
     /* Fragmentation test: Create holes and verify coalescing */
-    else if (strcmp(mode, "frag") == 0) {
+    else if (utils_strcmp(mode, "frag") == 0) {
         #define FRAG_BLOCKS 5
         #define FRAG_SIZE 64
         void *ptrs[FRAG_BLOCKS];
@@ -380,7 +410,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
         for(int i=0; i<FRAG_BLOCKS; i++) {
             ptrs[i] = allocator_malloc(FRAG_SIZE);
             TEST_ASSERT(ptrs[i] != NULL, "Alloc failed");
-            memset(ptrs[i], 0xAA, FRAG_SIZE); /* Poison memory */
+            utils_memset(ptrs[i], 0xAA, FRAG_SIZE); /* Poison memory */
         }
 
         cli_printf("2. Creating holes (Freeing index 1 and 3)...\r\n");
@@ -418,7 +448,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
     }
 
     /* Stress test: Random allocations and frees */
-    else if (strcmp(mode, "stress") == 0) {
+    else if (utils_strcmp(mode, "stress") == 0) {
         #define STRESS_MAX_PTRS 32
         void *ptrs[STRESS_MAX_PTRS] = {0};
         int alloc_count = 0;
@@ -444,7 +474,7 @@ static int cmd_heap_test_handler(int argc, char **argv) {
                     size_t sz = (mini_rand() % 128) + 8; /* Random size 8-136 bytes */
                     ptrs[slot] = allocator_malloc(sz);
                     if (ptrs[slot]) {
-                        memset(ptrs[slot], 0x55, sz); /* Touch memory */
+                        utils_memset(ptrs[slot], 0x55, sz); /* Touch memory */
                         alloc_count++;
                     }
                 }
@@ -508,6 +538,7 @@ void app_commands_register_all(void)
     cli_register_command(&reboot_cmd);
     cli_register_command(&blink_cmd);
     cli_register_command(&logger_cmd);
+    cli_register_command(&top_cmd);
 
     cli_register_command(&heap_test_cmd);
 }
