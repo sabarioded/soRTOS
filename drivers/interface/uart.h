@@ -120,4 +120,11 @@ void uart_set_rx_notify_task(uart_port_t port, uint16_t task_id);
  */
 void uart_set_rx_queue(uart_port_t port, queue_t *q);
 
+/**
+ * @brief Register a queue to source outgoing bytes (TX).
+ * @param port Handle to the UART port.
+ * @param q Pointer to the queue (NULL to disable).
+ */
+void uart_set_tx_queue(uart_port_t port, queue_t *q);
+
 #endif /* UART_H */

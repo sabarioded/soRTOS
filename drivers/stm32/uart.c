@@ -140,6 +140,7 @@ static volatile uint32_t uart_tx_tail[UART_MAX_INSTANCES];
 static volatile uint32_t uart_tx_overflow[UART_MAX_INSTANCES];
 static volatile uint16_t uart_rx_notify_tasks[UART_MAX_INSTANCES];
 static queue_t * volatile uart_rx_queues[UART_MAX_INSTANCES];
+static queue_t * volatile uart_tx_queues[UART_MAX_INSTANCES];
 
 
 /* Find array index for a given instance */
@@ -175,6 +176,7 @@ static int uart_register_instance(USART_TypeDef *UARTx)
             uart_tx_overflow[i] = 0;
             uart_rx_notify_tasks[i] = 0;
             uart_rx_queues[i] = NULL;
+            uart_tx_queues[i] = NULL;
             return i;
         }
     }
@@ -477,17 +479,29 @@ void uart_irq_handler(uart_port_t port)
 
     /* Check if the Transmit Data Register is Empty */
     if ((UARTx->ISR & USART_ISR_TXE) && (UARTx->CR1 & USART_CR1_TXEIE)) {
-        uint32_t head = uart_tx_head[idx];
-        uint32_t tail = uart_tx_tail[idx];
-        
-        /* If the buffer is not empty transmit*/
-        if (head != tail) {
-            UARTx->TDR = uart_tx_buf[idx][tail];
-            
-            uart_tx_tail[idx] = (tail + 1U) % UART_TX_BUFFER_SIZE;
+        /* Check if a TX Queue is registered */
+        if (uart_tx_queues[idx] != NULL) {
+            uint8_t b;
+            if (queue_receive_from_isr(uart_tx_queues[idx], &b) == 0) {
+                UARTx->TDR = b;
+            } else {
+                /* Queue is empty, disable TX interrupt */
+                UARTx->CR1 &= ~USART_CR1_TXEIE;
+            }
         } else {
-            /* Buffer is empty, stop the interrupt source */
-            UARTx->CR1 &= ~USART_CR1_TXEIE; 
+            /* Use internal Ring Buffer */
+            uint32_t head = uart_tx_head[idx];
+            uint32_t tail = uart_tx_tail[idx];
+            
+            /* If the buffer is not empty transmit*/
+            if (head != tail) {
+                UARTx->TDR = uart_tx_buf[idx][tail];
+                
+                uart_tx_tail[idx] = (tail + 1U) % UART_TX_BUFFER_SIZE;
+            } else {
+                /* Buffer is empty, stop the interrupt source */
+                UARTx->CR1 &= ~USART_CR1_TXEIE; 
+            }
         }
     }
 }
@@ -537,6 +551,7 @@ int uart_write_buffer(uart_port_t port, const char *src, size_t len) {
         sent++;
     }
 
+    /* After adding to the buffer, re-enable the TX interrupt */
     UARTx->CR1 |= USART_CR1_TXEIE;
     /* Exit Critical Section */
     arch_irq_unlock(stat);
@@ -570,11 +585,28 @@ void uart_set_rx_notify_task(uart_port_t port, uint16_t task_id) {
     }
 }
 
+/* Callback wrapper to enable TX interrupt when queue gets data */
+static void uart_tx_queue_callback(void *arg) {
+    uart_port_t port = (uart_port_t)arg;
+    uart_enable_tx_interrupt(port, 1);
+}
+
 void uart_set_rx_queue(uart_port_t port, queue_t *q) {
     USART_TypeDef *UARTx = (USART_TypeDef *)port;
     int idx = uart_get_index(UARTx);
     if (idx >= 0) {
         uart_rx_queues[idx] = q;
+    }
+}
+
+void uart_set_tx_queue(uart_port_t port, queue_t *q) {
+    USART_TypeDef *UARTx = (USART_TypeDef *)port;
+    int idx = uart_get_index(UARTx);
+    if (idx >= 0) {
+        uart_tx_queues[idx] = q;
+        if (q) {
+            queue_set_push_callback(q, uart_tx_queue_callback, port);
+        }
     }
 }
 
