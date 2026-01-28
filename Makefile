@@ -1,10 +1,10 @@
-# --- Project Configuration ---
-# Default platform (can be overridden: make PLATFORM=native)
-PLATFORM    ?= stm32l476rg
+# Project Configuration
+# Default platform (can be overridden: make PLATFORM=stm32l476rg)
+PLATFORM    ?= native
 TARGET      = soRTOS
 BUILD_DIR   = build/$(PLATFORM)
 
-# --- Directories ---
+# Directories
 APP_DIR     = app
 KERNEL_DIR  = kernel
 DRIVERS_DIR = drivers
@@ -12,7 +12,7 @@ PLATFORM_DIR= platform
 ARCH_DIR    = arch
 CONFIG_DIR  = config
 
-# --- Common Sources ---
+# Common Sources
 C_SRCS += \
 	$(APP_DIR)/main.c \
 	$(APP_DIR)/app_commands.c \
@@ -23,9 +23,13 @@ C_SRCS += \
 	$(KERNEL_DIR)/src/mutex.c \
 	$(KERNEL_DIR)/src/semaphore.c \
 	$(KERNEL_DIR)/src/queue.c \
-	$(KERNEL_DIR)/src/timer.c
+	$(KERNEL_DIR)/src/timer.c \
+	$(KERNEL_DIR)/src/event_group.c \
+	$(KERNEL_DIR)/src/mempool.c \
+	$(KERNEL_DIR)/src/logger.c \
 
-# --- Common Includes ---
+
+# Common Includes
 INCLUDES += \
 	-I$(APP_DIR) \
 	-I$(KERNEL_DIR)/include \
@@ -33,8 +37,7 @@ INCLUDES += \
 	-I$(PLATFORM_DIR) \
 	-I$(CONFIG_DIR)
 
-# --- Platform Specific Configuration ---
-
+# Platform Specific Configuration
 ifeq ($(PLATFORM), stm32l476rg)
 	# Toolchain
 	CC = arm-none-eabi-gcc
@@ -75,7 +78,7 @@ ifeq ($(PLATFORM), stm32l476rg)
 	OPENOCD_BOARD = board/st_nucleo_l4.cfg
 endif
 
-# --- Native (Host) Platform Configuration ---
+# Native (Host) Platform Configuration
 ifeq ($(PLATFORM), native)
 	CC = gcc
 	CFLAGS = -std=gnu11 -g -O0 -Wall -Wextra -I$(ARCH_DIR)/native -I$(PLATFORM_DIR)/native $(INCLUDES) -DHOST_PLATFORM
@@ -87,8 +90,7 @@ ifeq ($(PLATFORM), native)
 	LDFLAGS = 
 endif
 
-# --- Build Rules ---
-
+# Build Rules
 OBJS = $(addprefix $(BUILD_DIR)/, $(C_SRCS:.c=.o) $(ASM_SRCS:.S=.o))
 DEPS = $(OBJS:.o=.d)
 
@@ -119,18 +121,37 @@ else
 	@echo "Load command not supported/defined for platform: $(PLATFORM)"
 endif
 
-# --- Unit Tests (Native) ---
+# Unit Tests (Native)
 NATIVE_CC     = gcc
-NATIVE_CFLAGS = -std=gnu11 -g -Wall -I$(ARCH_DIR)/native $(INCLUDES) -Iexternal/unity/src -DUNIT_TESTING -DHOST_PLATFORM
+NATIVE_CFLAGS = -std=gnu11 -g -Wall -I$(ARCH_DIR)/native -I$(PLATFORM_DIR)/native $(INCLUDES) -Iexternal/unity/src -DUNIT_TESTING -DHOST_PLATFORM
 UNITY_SRC     = external/unity/src/unity.c
-TEST_SRCS     = tests/test_allocator.c $(KERNEL_DIR)/src/allocator.c $(KERNEL_DIR)/src/utils.c \
-                tests/test_mutex.c $(KERNEL_DIR)/src/mutex.c \
-                tests/test_scheduler.c $(KERNEL_DIR)/src/scheduler.c \
-                tests/test_semaphore.c $(KERNEL_DIR)/src/semaphore.c \
-                tests/test_queue.c $(KERNEL_DIR)/src/queue.c \
-                tests/test_timer.c $(KERNEL_DIR)/src/timer.c \
-                tests/test_common.c \
-                tests/test_main.c $(UNITY_SRC)
+
+TEST_SRCS     = tests/test_common.c \
+                tests/test_main.c \
+                tests/test_queue.c \
+                tests/test_scheduler.c \
+                tests/test_mutex.c \
+                tests/test_semaphore.c \
+                tests/test_allocator.c \
+                tests/test_timer.c \
+				tests/test_logger.c \
+				tests/test_utils.c \
+				tests/test_cli.c \
+				tests/test_event_group.c \
+				tests/test_mempool.c \
+                $(ARCH_DIR)/native/arch_ops.c \
+                $(KERNEL_DIR)/src/queue.c \
+                $(KERNEL_DIR)/src/scheduler.c \
+                $(KERNEL_DIR)/src/allocator.c \
+                $(KERNEL_DIR)/src/utils.c \
+                $(KERNEL_DIR)/src/logger.c \
+                $(KERNEL_DIR)/src/cli.c \
+                $(KERNEL_DIR)/src/mutex.c \
+                $(KERNEL_DIR)/src/semaphore.c \
+                $(KERNEL_DIR)/src/timer.c \
+                $(KERNEL_DIR)/src/event_group.c \
+				$(KERNEL_DIR)/src/mempool.c \
+                $(UNITY_SRC)
 TEST_BIN      = $(BUILD_DIR)/test_runner
 
 test:
