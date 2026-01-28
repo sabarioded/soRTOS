@@ -16,8 +16,9 @@ typedef struct sw_timer sw_timer_t;
  * @brief Initialize the software timer subsystem.
  * 
  * Creates the daemon task that manages timers.
+ * @param max_timers Maximum number of timers in the pool (0 for default).
  */
-void timer_service_init(void);
+void timer_service_init(uint32_t max_timers);
 
 /**
  * @brief Create a new software timer.

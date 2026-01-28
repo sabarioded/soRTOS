@@ -19,7 +19,7 @@ static uint8_t heap[4096];
 static void setUp_local(void) {
     allocator_init(heap, sizeof(heap));
     scheduler_init();
-    timer_service_init();
+    timer_service_init(0);
     mock_ticks = 0;
     callback_count = 0;
     callback_arg = NULL;

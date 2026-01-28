@@ -5,6 +5,7 @@
 #include "platform.h"
 #include "utils.h"
 #include "spinlock.h"
+#include "mempool.h"
 
 #define TIMER_FLAG_AUTORELOAD   (1 << 0)
 #define TIMER_FLAG_ACTIVE       (1 << 1)
@@ -22,6 +23,7 @@ struct sw_timer {
 static sw_timer_t *timer_list_head = NULL;
 static uint16_t timer_task_id = 0;
 static spinlock_t timer_lock;
+static mempool_t *timer_pool = NULL;
 
 /* Insert timer into sorted linked list (sorted by expiry_tick) */
 static void timer_insert(sw_timer_t *tmr) {
@@ -110,8 +112,16 @@ static void timer_task_entry(void *arg) {
 }
 
 /* Initialize the software timer subsystem */
-void timer_service_init(void) {
+void timer_service_init(uint32_t max_timers) {
     spinlock_init(&timer_lock);
+    
+    if (max_timers == 0) {
+        max_timers = TIMER_DEFAULT_POOL_SIZE;
+    }
+
+    /* Create memory pool for timers to prevent heap fragmentation */
+    timer_pool = mempool_create(sizeof(sw_timer_t), max_timers);
+
     /* Create the timer daemon task with high priority */
     int32_t id = task_create(timer_task_entry, NULL, STACK_SIZE_1KB, TASK_WEIGHT_HIGH);
     if (id > 0) {
@@ -125,7 +135,11 @@ sw_timer_t* timer_create(const char *name,
                         uint8_t auto_reload, 
                         timer_callback_t callback, 
                         void *arg) {
-    sw_timer_t *tmr = (sw_timer_t*)allocator_malloc(sizeof(sw_timer_t));
+    if (!timer_pool) {
+        return NULL;
+    }
+
+    sw_timer_t *tmr = (sw_timer_t*)mempool_alloc(timer_pool);
     if (!tmr) {
         return NULL;
     }
@@ -197,7 +211,7 @@ void timer_delete(sw_timer_t *timer) {
     }
     
     timer_stop(timer);
-    allocator_free(timer);
+    mempool_free(timer_pool, timer);
 }
 
 /* Get timer name */
