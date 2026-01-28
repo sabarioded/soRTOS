@@ -9,11 +9,8 @@
 #include "scheduler.h"
 #include "arch_ops.h"
 #include "queue.h"
+#include "logger.h"
 
-/* Prototype for the new CLI function (should be in cli.h) */
-void cli_set_rx_queue(queue_t *q);
-
-/* ---------- main ---------- */
 
 int main(void)
 {
@@ -23,19 +20,28 @@ int main(void)
     
     /* Initialize scheduler */
     scheduler_init();
+
+    /* Initialize Logger (creates log task) */
+    logger_init();
     
     /* Initialize CLI */
-    cli_init("OS> ", platform_uart_getc, platform_uart_puts);
+    cli_init("soRTOS> ", platform_uart_getc, platform_uart_puts);
     
     /* Register application commands */
     app_commands_register_all();
     
-    /* Create a queue for CLI input (size 1 byte, depth 16 chars) */
-    queue_t *cli_rx_queue = queue_create(sizeof(char), 16);
+    /* Create a queue for CLI input */
+    queue_t *cli_rx_queue = queue_create(sizeof(char), 128);
+
+    /* Create a queue for CLI output */
+    queue_t *cli_tx_queue = queue_create(sizeof(char), 128);
     
     /* Register queue with UART driver and CLI */
     platform_uart_set_rx_queue(cli_rx_queue);
     cli_set_rx_queue(cli_rx_queue);
+
+    platform_uart_set_tx_queue(cli_tx_queue);
+    cli_set_tx_queue(cli_tx_queue);
     
     /* Create CLI task */
     task_create(cli_task_entry, NULL, STACK_SIZE_2KB, TASK_WEIGHT_NORMAL);
