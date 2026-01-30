@@ -13,23 +13,23 @@ The soRTOS scheduler is a **preemptive, weighted fair scheduler** designed for *
 ```mermaid
 graph TD
     subgraph Global_Context [Global Scheduler Scope]
-        TaskPool[<b>Static Task Pool</b><br/>Fixed Array task_t]
-        GlobalLock[<b>Global Lock</b><br/>Protects Creation/Deletion]
-        ZombieList[<b>Zombie List</b><br/>Exited Tasks]
+        TaskPool["<b>Static Task Pool</b><br/>Fixed Array task_t"]
+        GlobalLock["<b>Global Lock</b><br/>Protects Creation/Deletion"]
+        ZombieList["<b>Zombie List</b><br/>Exited Tasks"]
     end
 
     subgraph CPU_0 [Per-CPU Context Core 0]
-        Heap0[<b>Ready Queue</b><br/>Min-Heap (vruntime)]
-        Sleep0[<b>Sleep List</b><br/>Sorted Linked List]
-        Curr0[<b>Current Task</b>]
-        Idle0[<b>Idle Task</b>]
+        Heap0["<b>Ready Queue</b><br/>Min-Heap (vruntime)"]
+        Sleep0["<b>Sleep List</b><br/>Sorted Linked List"]
+        Curr0["<b>Current Task</b>"]
+        Idle0["<b>Idle Task</b>"]
     end
 
     subgraph CPU_1 [Per-CPU Context Core N]
-        Heap1[<b>Ready Queue</b><br/>Min-Heap (vruntime)]
-        Sleep1[<b>Sleep List</b><br/>Sorted Linked List]
-        Curr1[<b>Current Task</b>]
-        Idle1[<b>Idle Task</b>]
+        Heap1["<b>Ready Queue</b><br/>Min-Heap (vruntime)"]
+        Sleep1["<b>Sleep List</b><br/>Sorted Linked List"]
+        Curr1["<b>Current Task</b>"]
+        Idle1["<b>Idle Task</b>"]
     end
 
     %% Relationships
