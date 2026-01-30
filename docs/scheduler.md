@@ -18,14 +18,14 @@ graph TD
         ZombieList[<b>Zombie List</b><br/>Exited Tasks]
     end
 
-    subgraph CPU_0 [Per-CPU Context (Core 0)]
+    subgraph CPU_0 [Per-CPU Context Core 0]
         Heap0[<b>Ready Queue</b><br/>Min-Heap (vruntime)]
         Sleep0[<b>Sleep List</b><br/>Sorted Linked List]
         Curr0[<b>Current Task</b>]
         Idle0[<b>Idle Task</b>]
     end
 
-    subgraph CPU_1 [Per-CPU Context (Core N)]
+    subgraph CPU_1 [Per-CPU Context Core N]
         Heap1[<b>Ready Queue</b><br/>Min-Heap (vruntime)]
         Sleep1[<b>Sleep List</b><br/>Sorted Linked List]
         Curr1[<b>Current Task</b>]
