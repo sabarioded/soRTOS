@@ -3,6 +3,8 @@
 ## Overview
 The soRTOS scheduler is a **preemptive, weighted fair scheduler** designed for **Symmetric Multi-Processing (SMP)**. It implements a variant of **Completely Fair Scheduling (CFS)**, similar to the Linux kernel, ensuring that all ready tasks receive a CPU share proportional to their weight.
 
+Unlike traditional Real-Time Operating Systems (RTOS) that use strict priority levels (where a high-priority task always starves a low-priority one), soRTOS ensures that all ready tasks receive a CPU share proportional to their weight.
+
 ### Key features:
 *   **Time Complexity:** $O(\log N)$ for task insertion/selection (Min-Heap).
 *   **Space Complexity:** $O(1)$ dynamic overhead (uses static/embedded nodes).
@@ -117,10 +119,15 @@ This ensures tasks with higher weights advance their `vruntime` more slowly, all
 Virtual runtime uses 64-bit unsigned integers, which can overflow. The scheduler handles this using **modular arithmetic**:
 
 $$
-\text{VRUNTIME\_LT}(a, b) = ((int64\_t)(a - b) < 0)
+\mathrm{VRUNTIME\_LT}(a, b) \equiv (\mathrm{int64\_t})(a - b) < 0
 $$
 
-This comparison works correctly even when values wrap around the 64-bit boundary.
+In C implementation:
+```c
+#define VRUNTIME_LT(a, b)   ((int64_t)((a) - (b)) < 0)
+```
+
+This comparison works correctly even when values wrap around the 64-bit boundary by treating the unsigned subtraction result as a signed integer, which preserves the ordering relationship.
 
 ---
 
@@ -133,26 +140,53 @@ sequenceDiagram
     participant HW as Hardware Timer
     participant ISR as Tick ISR
     participant Sched as Scheduler
+    participant Sleep as Sleep List
     participant Heap as Ready Heap
     participant Task as Running Task
 
+    Note over HW: Every system tick
     HW->>ISR: Timer Interrupt
     ISR->>Sched: scheduler_tick()
-    Sched->>Sched: Process Sleep List
-    Sched->>Task: Decrement time_slice
     
-    alt Time Slice Expired
-        Sched->>Task: Update vruntime
-        Sched->>Heap: Re-insert Task
-        Sched->>Heap: Pop Min vruntime
-        Sched->>Sched: Context Switch
-    else Higher Priority Ready
-        Sched->>Heap: Check Min vruntime
-        alt Min vruntime < Current vruntime
-            Sched->>Sched: Preempt Current
-            Sched->>Heap: Pop Min vruntime
-            Sched->>Sched: Context Switch
+    Note over Sched,Sleep: Step 1: Wake sleeping tasks
+    Sched->>Sleep: process_sleep_list()
+    Sleep-->>Sched: Wake tasks with expired timers
+    
+    alt Tasks woken up
+        Sched->>Heap: Insert woken tasks
+        Note over Heap: vruntime synchronized
+    end
+    
+    Note over Sched,Task: Step 2: Update current task
+    Sched->>Task: time_slice--
+    
+    alt time_slice == 0
+        Note over Task: Time slice expired
+        Task->>Task: vruntime += Δvruntime
+        Task->>Heap: Re-insert task
+        Sched->>Heap: heap_pop_min()
+        Heap-->>Sched: Next task (lowest vruntime)
+        Sched->>Sched: trigger_context_switch()
+    else time_slice > 0
+        Note over Sched,Heap: Step 3: Check preemption
+        Sched->>Heap: Check root vruntime
+        
+        alt heap_min < current_vruntime
+            Note over Sched: Higher priority task ready
+            Task->>Heap: Re-insert current task
+            Sched->>Heap: heap_pop_min()
+            Heap-->>Sched: Higher priority task
+            Sched->>Sched: trigger_context_switch()
+        else heap_min >= current_vruntime
+            Note over Task: Continue running
         end
+    end
+    
+    alt Current is idle AND heap not empty
+        Note over Sched: Always preempt idle
+        Sched->>Heap: heap_pop_min()
+        Heap-->>Sched: Real task
+        Sched->>Sched: trigger_context_switch()
     end
 ```
 
@@ -341,32 +375,62 @@ mutex->wait_list = node;
 
 ```mermaid
 stateDiagram-v2
-    [*] --> UNUSED
-    UNUSED --> READY : task_create()
+    direction LR
     
-    state "Per-CPU Scheduler" as CPU {
-        READY --> RUNNING : Scheduler Picks (Min vruntime)
-        RUNNING --> READY : Time Slice Expired / Preempted
-        
-        RUNNING --> BLOCKED : Mutex/Queue Wait
-        BLOCKED --> READY : Resource Available
-        
-        RUNNING --> SLEEPING : task_sleep() / Timeout Wait
-        SLEEPING --> READY : Timer Expire
-        SLEEPING --> READY : Notification Received
+    [*] --> UNUSED: System Init
+    
+    state "Task Creation" as Creation {
+        UNUSED --> READY: task_create()<br/>Allocate from pool<br/>Initialize stack<br/>Set weight & vruntime
     }
     
-    RUNNING --> ZOMBIE : task_exit()
-    ZOMBIE --> UNUSED : Garbage Collection
+    state "Active Scheduling" as Active {
+        state "Runnable" as Run {
+            READY --> RUNNING: Scheduler selects<br/>(lowest vruntime)
+            RUNNING --> READY: Time slice expired<br/>OR preempted by<br/>lower vruntime task
+        }
+        
+        state "Waiting" as Wait {
+            RUNNING --> BLOCKED: Lock mutex<br/>Wait for queue<br/>Block on semaphore
+            BLOCKED --> READY: Resource available<br/>OR timeout
+            
+            RUNNING --> SLEEPING: task_sleep()<br/>Wait with timeout<br/>Wait for notification
+            SLEEPING --> READY: Timer expired<br/>Notification received<br/>Timeout
+        }
+    }
+    
+    state "Termination" as Term {
+        RUNNING --> ZOMBIE: task_exit()<br/>Resources held
+        ZOMBIE --> UNUSED: Garbage collection<br/>by idle task
+    }
+    
+    note right of READY
+        In Ready Heap
+        Ordered by vruntime
+        Waiting for CPU
+    end note
+    
+    note right of RUNNING
+        Executing on CPU
+        time_slice counting down
+        Not in any queue
+    end note
     
     note right of BLOCKED
-        Task remains on sleep list
-        if waiting with timeout
+        Removed from heap
+        In resource wait list
+        May be in sleep list (timeout)
+    end note
+    
+    note right of SLEEPING
+        Removed from heap
+        In sleep list (sorted by wake time)
+        Can be woken early by notify
     end note
     
     note right of ZOMBIE
-        Task resources held until
-        GC runs (idle task)
+        Marked for deletion
+        In zombie list
+        Stack/resources not freed yet
     end note
 ```
 
@@ -666,71 +730,242 @@ Tunable parameters in `project_config.h`:
 | B | 2 | 29 | 28.6% | 200 |
 | C | 1 | 14 | 14.3% | 100 |
 
+**Execution Timeline:**
+
 ```mermaid
 gantt
-    title Task Execution Timeline (Weighted Fair Scheduling)
+    title Weighted Fair Scheduling - Task Execution Pattern
     dateFormat X
-    axisFormat %s
+    axisFormat %L ticks
     
-    section CPU
-    Task A (w=4) :0, 57
-    Task B (w=2) :57, 29
-    Task C (w=1) :86, 14
-    Task A (w=4) :100, 57
-    Task B (w=2) :157, 29
-    Task C (w=1) :186, 14
-    Task A (w=4) :200, 57
+    section Round 1
+    Task A (w=4, slice=57)  :a1, 0, 57
+    Task B (w=2, slice=29)  :b1, 57, 29
+    Task C (w=1, slice=14)  :c1, 86, 14
+    
+    section Round 2
+    Task A (w=4, slice=57)  :a2, 100, 57
+    Task B (w=2, slice=29)  :b2, 157, 29
+    Task C (w=1, slice=14)  :c2, 186, 14
+    
+    section Round 3
+    Task A (w=4, slice=57)  :a3, 200, 57
+    Task B (w=2, slice=29)  :b3, 257, 29
+    Task C (w=1, slice=14)  :c3, 286, 14
+    
+    section Round 4
+    Task A (w=4, slice=57)  :a4, 300, 57
+    Task B (w=2, slice=29)  :b4, 357, 29
+    Task C (w=1, slice=14)  :c4, 386, 14
 ```
 
-### Scenario 2: Task Blocking and Wake-up
+**Virtual Runtime Evolution:**
+
+Each task's vruntime increases at different rates based on weight. The table shows vruntime after each scheduling period:
+
+| Round | Task A vruntime | Task B vruntime | Task C vruntime | Next to Run |
+|:------|:----------------|:----------------|:----------------|:------------|
+| Start | 0 | 0 | 0 | A (ties → first) |
+| After A runs 57 ticks | **14.25** | 0 | 0 | B (min) |
+| After B runs 29 ticks | 14.25 | **14.50** | 0 | C (min) |
+| After C runs 14 ticks | 14.25 | 14.50 | **14.00** | A (min) |
+| After A runs 57 ticks | **28.50** | 14.50 | 14.00 | C (min) |
+| After C runs 14 ticks | 28.50 | 14.50 | **28.00** | B (min) |
+
+*Note: vruntime calculation: `Δvruntime = (physical_ticks × 1024) / weight`*
+
+**Key Observations:**
+1. Task A runs 4× more frequently than Task C (weight ratio 4:1)
+2. Task B runs 2× more frequently than Task C (weight ratio 2:1)
+3. All tasks' vruntimes remain close together (fairness)
+4. No task ever starves despite different weights
+
+### Scenario 2: Task Blocking and Wake-up with Vruntime Synchronization
+
+**Problem:** When a task sleeps or blocks for a long time, its vruntime falls far behind. If not synchronized, it would monopolize the CPU upon waking.
+
+**Setup:**
+- Task A: Currently running, vruntime = 1000
+- Task B: Blocked on mutex for a long time, old vruntime = 500
+- System minimum vruntime: 1000 (from heap root)
 
 ```mermaid
 sequenceDiagram
-    participant TaskA as Task A (Running)
+    participant TaskA as Task A<br/>(Running, vruntime=1000)
     participant Mutex as Mutex
-    participant TaskB as Task B (Blocked)
-    participant Heap as Ready Heap
+    participant Sched as Scheduler
+    participant Heap as Ready Heap<br/>(min=1000)
+    participant TaskB as Task B<br/>(Blocked, vruntime=500)
 
-    Note over TaskA: vruntime = 1000
-    Note over TaskB: vruntime = 500 (old)
+    Note over TaskA,TaskB: Task A holds mutex, Task B waiting
     
-    TaskA->>Mutex: Unlock
-    Mutex->>TaskB: Wake up
-    TaskB->>TaskB: Sync vruntime = max(500, 1000) = 1000
-    TaskB->>Heap: Insert with vruntime = 1000
-    Heap->>TaskB: Run (same priority as A)
+    TaskA->>Mutex: mutex_unlock()
+    Mutex->>Sched: Notify waiting task
+    Sched->>TaskB: task_unblock(B)
+    
+    Note over TaskB: Check vruntime drift
+    TaskB->>TaskB: Old vruntime = 500<br/>Min vruntime = 1000<br/>Drift = -500 ticks!
+    
+    alt vruntime < min_vruntime (Task slept too long)
+        Note over TaskB: Synchronize to prevent monopoly
+        TaskB->>TaskB: vruntime = max(500, 1000)<br/>= 1000
+    end
+    
+    TaskB->>Heap: Insert with vruntime=1000
+    
+    Note over Heap: Task B now has same<br/>priority as Task A
+    
+    Heap->>Sched: Compare vruntimes
+    Note over Sched: B.vruntime (1000) == A.vruntime (1000)<br/>Fair competition resumes
+    
+    alt If A's slice expired or B inserted first
+        Sched->>TaskB: Run Task B
+    else A still has time slice
+        Sched->>TaskA: Continue Task A<br/>(will preempt when slice expires)
+    end
+```
+
+**Why Synchronization Matters:**
+
+Without synchronization:
+```
+Task B vruntime: 500
+Task A vruntime: 1000
+→ Task B would run for (1000-500) = 500 ticks before Task A gets CPU!
+→ Unfair monopoly by sleeping task
+```
+
+With synchronization:
+```
+Task B vruntime: 500 → synchronized to 1000
+Task A vruntime: 1000
+→ Both tasks compete fairly based on current weights
+→ No monopoly, fair scheduling resumes
+```
+
+**Vruntime Synchronization Formula:**
+
+$$
+vruntime_{wake} = \max(vruntime_{task}, vruntime_{min})
+$$
+
+Where:
+- $vruntime_{task}$ = Task's old vruntime (before blocking)
+- $vruntime_{min}$ = Current minimum vruntime in system (heap root)
+
+**Implementation:**
+```c
+void task_unblock(task_t *task) {
+    // Get current minimum vruntime from heap
+    uint64_t min_vruntime = get_min_vruntime();
+    
+    // Synchronize if task fell too far behind
+    if (VRUNTIME_LT(task->vruntime, min_vruntime)) {
+        task->vruntime = min_vruntime;
+    }
+    
+    // Insert into ready heap
+    heap_insert(task);
+}
 ```
 
 ### Scenario 3: Priority Inversion Prevention
 
+Priority inversion occurs when a high-weight task is blocked by a low-weight task holding a resource, while a medium-weight task preempts the low-weight task.
+
+**Setup:**
+- Low Task: weight = 1, holds mutex
+- Medium Task: weight = 5
+- High Task: weight = 10, needs mutex
+
 **Without Priority Inheritance:**
+
 ```mermaid
 gantt
-    title Without Priority Inheritance
+    title Priority Inversion Problem (Without Inheritance)
     dateFormat X
-    axisFormat %s
+    axisFormat %s ticks
     
-    section Timeline
-    Low holds lock   :0, 100
-    Med preempts     :100, 200
-    High blocked     :100, 300
-    Low finishes     :300, 50
-    High runs        :350, 100
+    section Low Task (w=1)
+    Acquires mutex          :milestone, m1, 0, 0
+    Runs (holds lock)       :l1, 0, 50
+    Preempted by Medium     :crit, 50, 1
+    Blocked by Medium       :crit, 50, 200
+    Runs again              :l2, 250, 50
+    Releases mutex          :milestone, m2, 300, 0
+    
+    section Medium Task (w=5)
+    Becomes ready           :milestone, m3, 50, 0
+    Preempts Low            :active, 50, 200
+    
+    section High Task (w=10)
+    Needs mutex             :milestone, m4, 100, 0
+    Blocked waiting         :crit, 100, 200
+    Acquires & runs         :done, 300, 100
 ```
 
+**Total high-priority wait time: 200 ticks** (blocked by medium-priority task!)
+
 **With Priority Inheritance:**
+
 ```mermaid
 gantt
-    title With Priority Inheritance
+    title Priority Inheritance Solution
     dateFormat X
-    axisFormat %s
+    axisFormat %s ticks
     
-    section Timeline
-    Low holds lock (boosted) :0, 150
-    High blocked             :100, 50
-    Low finishes (unboosted) :150, 0
-    High runs                :150, 100
-    Med runs                 :250, 100
+    section Low Task (w=1→10→1)
+    Acquires mutex          :milestone, m1, 0, 0
+    Runs (w=1)              :l1, 0, 50
+    Weight boosted to 10    :milestone, m2, 50, 0
+    Runs (boosted, w=10)    :done, 50, 100
+    Releases mutex          :milestone, m3, 150, 0
+    Weight restored to 1    :milestone, m4, 150, 0
+    
+    section Medium Task (w=5)
+    Becomes ready           :milestone, m5, 50, 0
+    Cannot preempt (Low boosted) :crit, 50, 100
+    Runs after High done    :active, 250, 100
+    
+    section High Task (w=10)
+    Needs mutex (boosts Low) :milestone, m6, 50, 0
+    Blocked (short wait)    :crit, 50, 100
+    Acquires & runs         :done, 150, 100
+```
+
+**Total high-priority wait time: 100 ticks** (only blocked by boosted low-priority task)
+
+**Improvement: 50% reduction in blocking time!**
+
+#### Implementation Details
+
+```c
+// When High Task blocks on mutex held by Low Task:
+void mutex_block_with_inheritance(mutex_t *mutex, task_t *high_task) {
+    task_t *lock_holder = mutex->owner;
+    
+    // Boost lock holder to blocker's weight
+    if (high_task->weight > lock_holder->weight) {
+        task_boost_weight(lock_holder, high_task->weight);
+    }
+    
+    // Block the high priority task
+    task_block(high_task);
+}
+
+// When Low Task releases mutex:
+void mutex_unlock(mutex_t *mutex) {
+    task_t *lock_holder = mutex->owner;
+    
+    // Restore original weight
+    task_restore_base_weight(lock_holder);
+    
+    // Wake next waiter
+    task_t *next = mutex->wait_list;
+    if (next) {
+        task_unblock(next);
+    }
+}
 ```
 
 ---
