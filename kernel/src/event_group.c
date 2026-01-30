@@ -224,16 +224,15 @@ uint32_t event_group_wait_bits(event_group_t *eg,
         return eg->bits;
     }
     
+    /* Mark as blocked BEFORE unlocking to ensure we don't miss the wakeup 
+     * if an ISR fires immediately after unlock. */
+    task_set_state(current, TASK_BLOCKED);
+    spin_unlock(&eg->lock, flags);
+    
     /* Handle blocking atomically for infinite wait to prevent lost wakeups */
     if (timeout_ticks > 0 && timeout_ticks != UINT32_MAX) {
-        spin_unlock(&eg->lock, flags);
         task_sleep_ticks(timeout_ticks);
     } else {
-        /* Mark as blocked BEFORE unlocking to ensure we don't miss the wakeup 
-         * if an ISR fires immediately after unlock. */
-        task_set_state(current, TASK_BLOCKED);
-        spin_unlock(&eg->lock, flags);
-        
         platform_yield();
     }
     
