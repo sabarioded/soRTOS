@@ -2,66 +2,75 @@
 
 
 /* Poll register until bits in mask are set */
-int wait_for_flag_set(volatile uint32_t *reg, uint32_t mask, uint32_t max_iter)
+int wait_for_flag_set(volatile uint32_t *reg_addr, uint32_t bit_mask, uint32_t timeout_cycles)
 {
-    uint32_t i = max_iter;
-    while(((*reg) & mask) == 0U) {
-        if (i-- == 0U) return -1;
+    uint32_t i = timeout_cycles;
+    while(((*reg_addr) & bit_mask) == 0U) {
+        if (i-- == 0U) {
+            return -1;
+        }
     }
     return 0;
 }
 
 
 /* Poll register until bits in mask are cleared */
-int wait_for_flag_clear(volatile uint32_t *reg, uint32_t mask, uint32_t max_iter)
+int wait_for_flag_clear(volatile uint32_t *reg_addr, uint32_t bit_mask, uint32_t timeout_cycles)
 {
-    uint32_t i = max_iter;
-    while(((*reg) & mask) != 0U) {
-        if (i-- == 0U) return -1;
+    uint32_t i = timeout_cycles;
+    while(((*reg_addr) & bit_mask) != 0U) {
+        if (i-- == 0U) {
+            return -1;
+        }
     }
     return 0;
 }
 
 
 /* Poll register until masked value equals expected value */
-int wait_for_reg_mask_eq(volatile uint32_t *reg, uint32_t mask, uint32_t expected, uint32_t max_iter)
+int wait_for_reg_mask_eq(volatile uint32_t *reg_addr, 
+                        uint32_t bit_mask, 
+                        uint32_t expected_value, 
+                        uint32_t timeout_cycles)
 {
-    uint32_t i = max_iter;
-    while(((*reg) & mask) != expected) {
-        if (i-- == 0U) return -1;
+    uint32_t i = timeout_cycles;
+    while(((*reg_addr) & bit_mask) != expected_value) {
+        if (i-- == 0U) {
+            return -1;
+        }
     }
     return 0;
 }
 
 
 /* Simple string to integer conversion */
-int utils_atoi(const char *string) {
+int utils_atoi(const char *str) {
     int res = 0;
-    int interim = 0;
-    while(*string && *string >= '0' && *string <= '9') {
-        interim = *string - '0';
-        res = res * 10 + interim;
-        string++;
+    int digit = 0;
+    while(*str && *str >= '0' && *str <= '9') {
+        digit = *str - '0';
+        res = res * 10 + digit;
+        str++;
     }
     return res;
 }
 
 
 /* Fill memory with constant byte */
-void *utils_memset(void *s, int c, size_t n) {
-    unsigned char *p = s;
-    while (n--) {
-        *p++ = (unsigned char)c;
+void *utils_memset(void *dest, int value, size_t count) {
+    unsigned char *p = dest;
+    while (count--) {
+        *p++ = (unsigned char)value;
     }
-    return s;
+    return dest;
 }
 
 
 /* Copy memory block */
-void *utils_memcpy(void *dest, const void *src, size_t n) {
+void *utils_memcpy(void *dest, const void *src, size_t count) {
     unsigned char *d = dest;
     const unsigned char *s = src;
-    while (n--) {
+    while (count--) {
         *d++ = *s++;
     }
     return dest;
@@ -69,10 +78,10 @@ void *utils_memcpy(void *dest, const void *src, size_t n) {
 
 
 /* Compare two strings */
-int utils_strcmp(const char *s1, const char *s2) {
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
+int utils_strcmp(const char *str1, const char *str2) {
+    while (*str1 && (*str1 == *str2)) {
+        str1++;
+        str2++;
     }
-    return *(const unsigned char *)s1 - *(const unsigned char *)s2;
+    return *(const unsigned char *)str1 - *(const unsigned char *)str2;
 }
