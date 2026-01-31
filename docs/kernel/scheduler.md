@@ -9,18 +9,16 @@
   - [Virtual Runtime (vruntime)](#virtual-runtime-vruntime)
   - [Basic Formula](#basic-formula)
   - [Weight-Based Time Allocation](#weight-based-time-allocation)
-  - [Time Slice Calculation](#time-slice-calculation)
+  - [Time Slice Calculation (as implemented)](#time-slice-calculation-as-implemented)
   - [Virtual Runtime Update](#virtual-runtime-update)
   - [Handling Overflow](#handling-overflow)
 - [Scheduling Algorithm](#scheduling-algorithm)
-  - [High-Level Flow](#high-level-flow)
-  - [Detailed Steps](#detailed-steps)
+  - [Scheduling Decision Flow](#scheduling-decision-flow)
 - [Data Structures](#data-structures)
   - [The Ready Queue (Min-Heap)](#the-ready-queue-min-heap)
   - [Sleep List](#sleep-list)
   - [Zero-Malloc Blocking (The Wait Node)](#zero-malloc-blocking-the-wait-node)
 - [Task Lifecycle](#task-lifecycle)
-  - [Lifecycle Phases (Alternative View)](#lifecycle-phases-alternative-view)
   - [State Descriptions](#state-descriptions)
   - [State Transitions](#state-transitions)
 - [SMP Synchronization](#smp-synchronization)
@@ -35,17 +33,13 @@
   - [Time Complexity Summary](#time-complexity-summary)
   - [Space Complexity](#space-complexity)
   - [Fairness Guarantee](#fairness-guarantee)
-- [Optimization Techniques](#optimization-techniques)
 - [Configuration Parameters](#configuration-parameters)
   - [Tuning Guidelines](#tuning-guidelines)
 - [Example Scenarios](#example-scenarios)
   - [Scenario 1: Three Tasks with Different Weights](#scenario-1-three-tasks-with-different-weights)
   - [Scenario 2: Task Blocking and Wake-up with Vruntime Synchronization](#scenario-2-task-blocking-and-wake-up-with-vruntime-synchronization)
   - [Scenario 3: Priority Inversion Prevention](#scenario-3-priority-inversion-prevention)
-- [Debugging and Profiling](#debugging-and-profiling)
-  - [Stack Overflow Detection](#stack-overflow-detection)
-  - [Runtime Statistics](#runtime-statistics)
-  - [Heap Validation](#heap-validation)
+- [Debugging Features](#debugging-features)
 - [Appendix: Code Snippets](#appendix-code-snippets)
 
 ---
@@ -69,7 +63,7 @@ graph TD
         TaskPool["<b>Static Task Pool</b><br/>Fixed Array task_t"]
         GlobalLock["<b>Global Lock</b><br/>Protects Creation/Deletion"]
         ZombieList["<b>Zombie List</b><br/>Exited Tasks"]
-        IDbitmap["<b>ID Bitmap</b><br/>64-bit bitmap for ID allocation"]
+        IDbitmap["<b>ID Bitmap</b><br/>Array of 64-bit bitmaps"]
     end
 
     subgraph CPU_0 [Per-CPU Context Core 0]
@@ -143,17 +137,22 @@ $$
 \text{Time Slice}_i = \text{BASE\_SLICE\_TICKS} \times w_i
 $$
 
-This gives CPU share proportional to weight, and it also makes the **vruntime step per full slice roughly constant**:
+This design ensures CPU share is proportional to weight, while maintaining fairness in the virtual timeline.
+
+**Why it works:**
+1.  **Throughput:** A task's physical run time ($\Delta t$) is scaled by its weight ($w_i$).
+    $$ \Delta t = \text{BASE\_SLICE\_TICKS} \times w_i $$
+2.  **Fairness:** The cost charged to `vruntime` is inversely proportional to weight.
+    $$ \Delta vruntime = \frac{\Delta t \times \text{VRUNTIME\_SCALER}}{w_i} $$
+
+**The Cancellation Effect:**
+When a task consumes its full time slice, the weight factors cancel out:
 
 $$
-\Delta vruntime = \frac{\Delta t \times \text{VRUNTIME\_SCALER}}{w_i}
-\quad\text{with}\quad
-\Delta t = \text{BASE\_SLICE\_TICKS} \times w_i
-\Rightarrow
-\Delta vruntime \approx \text{BASE\_SLICE\_TICKS} \times \text{VRUNTIME\_SCALER}
+\Delta vruntime = \frac{(\text{BASE\_SLICE\_TICKS} \times w_i) \times \text{VRUNTIME\_SCALER}}{w_i} = \text{BASE\_SLICE\_TICKS} \times \text{VRUNTIME\_SCALER}
 $$
 
-So after each runnable task consumes a full slice, their vruntimes stay close (fairness), while heavier tasks simply run longer each time (more throughput).
+**Result:** Every task, regardless of weight, advances its virtual clock by the same amount per "turn". This keeps `vruntime` values synchronized (fairness), even though high-weight tasks physically run longer (throughput).
 
 **In the code (simplified from `task_create()` and `schedule_next_task()`):**
 ```c
@@ -201,107 +200,49 @@ This comparison works correctly even when values wrap around the 64-bit boundary
 
 ## Scheduling Algorithm
 
-### High-Level Flow
+### Scheduling Decision Flow
 
-```mermaid
-sequenceDiagram
-    participant HW as Hardware Timer
-    participant ISR as Tick ISR
-    participant Sched as Scheduler
-    participant Sleep as Sleep List
-    participant Heap as Ready Heap
-    participant Task as Running Task
+The scheduling logic executes on every system tick (`scheduler_tick`) and during context switches (`schedule_next_task`).
 
-    Note over HW: Every system tick
-    HW->>ISR: Timer Interrupt
-    ISR->>Sched: scheduler_tick()
-    
-    Note over Sched,Sleep: Step 1: Wake sleeping tasks
-    Sched->>Sleep: process_sleep_list()
-    Sleep-->>Sched: Wake tasks with expired timers
-    
-    alt Tasks woken up
-        Sched->>Heap: Insert woken tasks
-        Note over Heap: vruntime synchronized
-    end
-    
-    Note over Sched,Task: Step 2: Update current task
-    Sched->>Task: time_slice--
-    
-    alt time_slice == 0
-        Note over Task: Time slice expired
-        Task->>Task: vruntime += Δvruntime
-        Task->>Heap: Re-insert task
-        Sched->>Heap: heap_pop_min()
-        Heap-->>Sched: Next task (lowest vruntime)
-        Sched->>Sched: trigger_context_switch()
-    else time_slice > 0
-        Note over Sched,Heap: Step 3: Check preemption
-        Sched->>Heap: Check root vruntime
+1.  **Process Sleeping Tasks**
+    *   The scheduler checks the **Sleep List** (sorted by wake time).
+    *   Tasks with expired timeouts are woken up.
+    *   **Vruntime Synchronization:** To prevent "sleep monopoly," woken tasks have their `vruntime` clamped to the current system minimum:
+        ```c
+        if (VRUNTIME_LT(task->vruntime, min_vruntime)) task->vruntime = min_vruntime;
+        ```
+    *   Tasks are inserted into the **Ready Heap** ($O(\log N)$).
+
+2.  **Update Current Task**
+    *   The running task's `time_slice` is decremented.
+    *   **Time Slice Calculation:** Slices are proportional to weight:
+        ```c
+        max_slice = task->weight * BASE_SLICE_TICKS;
+        ```
+
+3.  **Check for Preemption**
+    *   **Slice Expiration:** If `time_slice` reaches 0, the task is flagged for preemption.
+    *   **Fairness Preemption:** If a waiting task in the Ready Heap has a lower `vruntime` than the current task, it indicates the current task has "overstayed" its fair share relative to others.
+        ```c
+        if (VRUNTIME_LT(min_ready_vruntime, curr->vruntime)) reschedule = 1;
+        ```
+    *   **Idle Preemption:** If the Idle task is running and *any* task becomes ready, preemption is immediate.
+
+4.  **Context Switch & Vruntime Charging**
+    *   If a reschedule is required, `schedule_next_task()` is called.
+    *   **Charge Vruntime:** The outgoing task is charged for the ticks it actually consumed, scaled inversely by weight:
+        ```c
+        ticks_ran = max_slice - time_slice;
+        if (ticks_ran == 0) ticks_ran = 1; /* prevent free yields */
         
-        alt heap_min < current_vruntime
-            Note over Sched: Higher priority task ready
-            Task->>Heap: Re-insert current task
-            Sched->>Heap: heap_pop_min()
-            Heap-->>Sched: Higher priority task
-            Sched->>Sched: trigger_context_switch()
-        else heap_min >= current_vruntime
-            Note over Task: Continue running
-        end
-    end
-    
-    alt Current is idle AND heap not empty
-        Note over Sched: Always preempt idle
-        Sched->>Heap: heap_pop_min()
-        Heap-->>Sched: Real task
-        Sched->>Sched: trigger_context_switch()
-    end
-```
+        vruntime += (ticks_ran * VRUNTIME_SCALER) / weight;
+        ```
+    *   **Replenish Slice:** The task's time slice is reset to `max_slice`.
+    *   **Re-insertion:** The outgoing task is re-inserted into the Ready Heap.
 
-### Detailed Steps
-
-1. **Task Selection:**
-   - Always select the READY task with the **lowest `vruntime`** from the per-CPU min-heap.
-
-2. **Time Slice Allocation:**
-   - Each task’s slice is **weight-scaled**:
-     ```c
-     max_slice = task->weight * BASE_SLICE_TICKS;
-     task->time_slice = max_slice;
-     ```
-
-3. **Runtime Tracking (per tick):**
-   - On every system tick (`scheduler_tick()`), decrement the running task’s `time_slice`.
-   - If the slice hits zero, request a reschedule.
-
-4. **Vruntime Charging (on switch/yield/preempt):**
-   - When switching away from a running task (`schedule_next_task()`), charge the task for what it actually ran:
-     ```c
-     ticks_ran = (weight * BASE_SLICE_TICKS) - time_slice;
-     if (ticks_ran == 0) ticks_ran = 1; /* prevent free yields */
-
-     vruntime += (ticks_ran * VRUNTIME_SCALER) / weight;
-     time_slice = weight * BASE_SLICE_TICKS; /* replenish */
-     ```
-
-5. **Re-insertion:**
-   - If the task is not idle and is still runnable, re-insert it into the heap with its updated `vruntime` (`O(log N)`).
-
-6. **Preemption Check:**
-   - On tick, preempt if a READY task has lower `vruntime` than the current task:
-     ```c
-     if (VRUNTIME_LT(min_ready_vruntime, curr->vruntime)) 
-        reschedule = 1;
-     ```
-   - Special case: **idle must always be preempted** if the heap is non-empty.
-
-7. **Sleep/Wake Handling:**
-   - Sleeping tasks are moved to a sorted sleep list.
-   - When waking/unblocking, clamp the task’s `vruntime` up to the current minimum to prevent “sleep monopoly”:
-     ```c
-     if (VRUNTIME_LT(task->vruntime, min_vruntime)) task->vruntime = min_vruntime;
-        heap_insert(task);
-     ```
+5.  **Select Next Task**
+    *   The task with the **lowest `vruntime`** is popped from the Ready Heap ($O(\log N)$).
+    *   If the heap is empty, the **Idle Task** is selected.
 
 ---
 
@@ -569,7 +510,7 @@ graph TD
 ### Lock Ordering Rules
 
 1.  **Never hold multiple CPU locks simultaneously** (prevents deadlock)
-2.  **Global lock can be acquired while holding a CPU lock** (for zombie management)
+2.  **CPU lock can be acquired while holding Global lock**
 3.  **Task-specific operations use the CPU lock of the task's affinity**
 
 ### Critical Sections
@@ -709,54 +650,6 @@ $$
 
 Where $\epsilon$ is bounded by the maximum time slice duration.
 
-**Proof of Fairness:**
-- Tasks are ordered by `vruntime`
-- Lower `vruntime` → higher priority
-- Running increases `vruntime` inversely proportional to weight
-- Therefore, tasks converge to fair allocation over time
-
----
-
-## Optimization Techniques
-
-### 1. Cache Locality
-
-**Array-based heap** instead of pointer-based tree:
-- Sequential memory access patterns
-- Better CPU cache utilization
-- Prefetching advantages
-
-### 2. Embedded Wait Nodes
-
-**No dynamic allocation** during blocking:
-- Predictable memory usage
-- No allocation failures
-- Faster blocking operations
-
-### 3. Modular Arithmetic for Overflow
-
-**Safe 64-bit comparison** without branches:
-```c
-#define VRUNTIME_LT(a, b) ((int64_t)((a) - (b)) < 0)
-```
-
-This handles wrap-around correctly without conditional logic.
-
-### 4. Bitmap for ID Allocation
-
-**O(1) ID lookup** using 64-bit bitmaps:
-```c
-#define BITMAP_IDX(id)  ((size_t)((id) - 1) / 64)
-#define BITMAP_BIT(id)  ((size_t)((id) - 1) % 64)
-```
-
-### 5. Spinlock-Based Synchronization
-
-**Lock-free where possible**, spin-locks otherwise:
-- No priority inversion from sleeping locks
-- Suitable for short critical sections
-- SMP-safe with minimal overhead
-
 ---
 
 ## Configuration Parameters
@@ -857,7 +750,7 @@ So every task advances by the same vruntime step per round (ties are broken by h
 - Task B: Blocked on mutex for a long time, old vruntime = 500
 - System minimum vruntime: 1000 (from heap root)
 
-Wake-up steps (text):
+Wake-up steps:
 
 1. Task A unlocks the mutex.
 2. Scheduler unblocks Task B.
@@ -991,49 +884,13 @@ void mutex_unlock(mutex_t *mutex) {
 
 ---
 
-## Debugging and Profiling
+## Debugging Features
 
-### Stack Overflow Detection
+The scheduler includes built-in mechanisms to aid in debugging and system analysis:
 
-Each task's stack is canary-protected:
-```c
-*((uint32_t*)task->stack_ptr) = STACK_CANARY;
-
-void task_check_stack_overflow(void) {
-    for (each task) {
-        if (*((uint32_t*)task->stack_ptr) != STACK_CANARY) {
-            panic("Stack overflow detected!");
-        }
-    }
-}
-```
-
-### Runtime Statistics
-
-Track per-task metrics:
-```c
-typedef struct {
-    uint64_t total_cpu_ticks;    // Total CPU time consumed
-    uint64_t last_switch_tick;   // Last context switch time
-    uint64_t vruntime;           // Current virtual runtime
-    uint32_t context_switches;   // Number of preemptions
-} task_stats_t;
-```
-
-### Heap Validation
-
-Verify heap integrity in debug builds:
-```c
-void validate_heap(scheduler_cpu_t *ctx) {
-    for (int i = 0; i < ctx->heap_size; i++) {
-        int parent = (i - 1) / 2;
-        if (i > 0) {
-            assert(ctx->ready_heap[parent]->vruntime <= 
-                   ctx->ready_heap[i]->vruntime);
-        }
-    }
-}
-```
+1.  **Stack Overflow Detection:** A "canary" value (`0xDEADBEEF`) is placed at the bottom of every task stack. The scheduler checks this value periodically; if corrupted, the system panics.
+2.  **Runtime Statistics:** Each task tracks `total_cpu_ticks`, `vruntime`, and `last_switch_tick` for precise CPU usage analysis.
+3.  **Heap Integrity:** In debug builds, the scheduler can validate the min-heap invariant ($\text{parent} \le \text{child}$) to detect corruption in the ready queue.
 
 ---
 
