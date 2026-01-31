@@ -55,6 +55,7 @@ task_create_first:
     LDR r0, =task_current       /* r0 = &task_current */
     LDR r0, [r0]                /* r0 = task_current */
     LDR r0, [r0]                /* r0 = task_current->psp */
+    ADD r0, r0, #4              /* Skip LR (EXC_RETURN) on stack */
     LDMIA r0!, {r4-r11}         /* restore R4-R11 from task stack */
     MSR PSP, r0                 /* PSP = task_current->psp */
 
@@ -79,7 +80,15 @@ task_create_first:
 PendSV_Handler:
     /* first we need to save the task context in the stack */
     MRS r0, PSP                 /* r0 = PSP */
+
+    /* Check if FPU was used (Bit 4 of LR is 0) */
+    TST lr, #0x10
+    IT EQ
+    VSTMDBEQ r0!, {s16-s31}     /* Save FPU Callee-Saved Registers */
+
     STMDB r0!, {r4-r11}         /* save R4-R11 on task stack */
+    STMDB r0!, {lr}             /* save EXC_RETURN on task stack */
+
     LDR r1, =task_current       /* r1 = &task_current */
     LDR r1, [r1]                /* r1 = task_current */
     STR r0, [r1]                /* task_current->psp = r0 */
@@ -93,7 +102,15 @@ PendSV_Handler:
     LDR r1, =task_next          /* r1 = &task_next */
     LDR r1, [r1]                /* r1 = task_next */
     LDR r0, [r1]                /* r0 = task_next->psp */
+    
+    LDMIA r0!, {lr}             /* restore EXC_RETURN */
     LDMIA r0!, {r4-r11}         /* restore R4-R11 from task stack */
+
+    /* Check if we need to restore FPU */
+    TST lr, #0x10
+    IT EQ
+    VLDMIAEQ r0!, {s16-s31}     /* Restore FPU Callee-Saved Registers */
+
     MSR PSP, r0                 /* PSP = r0 */
 
     /* update task_current = task_next */
@@ -103,4 +120,3 @@ PendSV_Handler:
     STR r2, [r1]                /* task_current = task_next */
 
     BX lr                       /* exception return to the next task */
-

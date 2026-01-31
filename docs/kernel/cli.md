@@ -20,7 +20,7 @@
   - [Time Complexity](#time-complexity)
   - [Space Complexity](#space-complexity)
 - [Configuration Parameters](#configuration-parameters)
-- [API Reference](#api-reference)
+
 - [Example Scenarios](#example-scenarios)
   - [Scenario 1: Registering a Custom Command](#scenario-1-registering-a-custom-command)
   - [Scenario 2: Asynchronous Output from Tasks](#scenario-2-asynchronous-output-from-tasks)
@@ -125,29 +125,21 @@ static struct {
 
 ### High-Level Flow
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant ISR as UART ISR
-    participant Queue as RX Queue
-    participant CLI as CLI Task
-    participant Handler as Command Handler
+**Logic Flow:**
 
-    User->>ISR: Type 'help\r'
-    loop For each char
-        ISR->>Queue: queue_push_from_isr(char)
-        CLI->>Queue: queue_pop(&char)
-        CLI->>CLI: Update Line Buffer
-        CLI->>User: Echo char
-    end
-    
-    Note over CLI: Enter Key Detected
-    CLI->>CLI: Tokenize "help"
-    CLI->>CLI: Lookup Command
-    CLI->>Handler: cmd_help_handler(argc, argv)
-    Handler-->>CLI: return 0
-    CLI->>User: Print Prompt "OS> "
-```
+1.  **Input:** User types a character (e.g., 'A').
+2.  **ISR:** Hardware interrupt pushes the character to the RX Queue (`queue_push_from_isr`).
+3.  **CLI Task:**
+    *   Wakes up when data is available in RX Queue (`queue_pop`).
+    *   Updates the local **Line Buffer** and cursor position.
+    *   **Echoes** the character back to the user via TX Queue (for visual feedback).
+4.  **Command Execution:**
+    *   User presses **Enter**.
+    *   CLI task parses the line buffer (tokenizes arguments).
+    *   Looks up the command in the **Registry**.
+    *   Calls the matching **Command Handler**.
+    *   Command handler executes logic (e.g., prints output).
+    *   CLI prints the prompt (e.g., `OS> `) again.
 
 ### Input Processing & Line Editing
 
@@ -221,19 +213,7 @@ Defined in `project_config.h`:
 
 ---
 
-## API Reference
 
-| Function | Description | Thread Safe? |
-|:---|:---|:---|
-| `cli_init` | Initialize CLI subsystem | No |
-| `cli_register_command` | Register a new command | **Yes** |
-| `cli_unregister_command` | Remove a command | **Yes** |
-| `cli_set_rx_queue` | Set input queue | No |
-| `cli_set_tx_queue` | Set output queue | No |
-| `cli_printf` | Print formatted string | **Yes** |
-| `cli_task_entry` | Main task loop | N/A |
-
----
 
 ## Example Scenarios
 

@@ -11,6 +11,12 @@
 extern size_t mock_ticks;
 
 /**
+ * @brief Mock CPU frequency.
+ * Used by platform_get_cpu_freq().
+ */
+extern size_t mock_cpu_freq;
+
+/**
  * @brief Counter for how many times platform_yield() was called.
  */
 extern int mock_yield_count;

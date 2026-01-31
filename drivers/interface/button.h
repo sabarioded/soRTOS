@@ -2,7 +2,6 @@
 #define BUTTON_H
 
 #include <stdint.h>
-#include "device_registers.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,10 +13,29 @@ extern "C" {
 void button_init(void);
 
 /**
- * @brief read the state of the button
- * @return 1 if the button is pressed, 0 otherwise.
+ * @brief Read the raw state of the button (no debouncing).
+ * @return 1 if the button is physically pressed, 0 otherwise.
  */
 uint32_t button_read(void);
+
+/**
+ * @brief Process button state logic.
+ * Call this function periodically (e.g., every 5ms to 20ms) from a task or timer.
+ */
+void button_poll(void);
+
+/**
+ * @brief Check if the button is currently held down (debounced).
+ * @return 1 if stable state is pressed, 0 otherwise.
+ */
+uint32_t button_is_held(void);
+
+/**
+ * @brief Check if the button was newly pressed since the last call.
+ * This clears the event flag after reading.
+ * @return 1 if a press event occurred, 0 otherwise.
+ */
+uint32_t button_was_pressed(void);
 
 #ifdef __cplusplus
 }

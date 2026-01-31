@@ -16,9 +16,12 @@ void platform_panic(void) {
     exit(EXIT_FAILURE);
 }
 
-/* Platform Mock: Return a fixed 1MHz frequency for calculations */
+/* Mock State: CPU Frequency */
+size_t mock_cpu_freq = 1000000;
+
+/* Platform Mock: Return the mock frequency */
 size_t platform_get_cpu_freq(void) {
-    return 1000000; 
+    return mock_cpu_freq; 
 }
 
 /* Platform Mock: Systick init is a no-op on host */

@@ -21,7 +21,7 @@
 - [Example Scenarios](#example-scenarios)
   - [Scenario 1: Fixed-Size Buffer Pool](#scenario-1-fixed-size-buffer-pool)
   - [Scenario 2: Timer Pool](#scenario-2-timer-pool)
-- [API Reference](#api-reference)
+
 - [Appendix: Code Snippets](#appendix-code-snippets)
 
 ---
@@ -131,66 +131,14 @@ free_list → Item 1 → Item 2 → NULL
 
 ### Pool Creation
 
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant Mempool
-    participant Allocator
-    participant Buffer
-
-    Caller->>Mempool: mempool_create(item_size, count)
-    Mempool->>Mempool: Calculate real_size<br/>(max(item_size, sizeof(void*)), aligned)
-    Mempool->>Allocator: allocator_malloc(sizeof(mempool_t))
-    Allocator-->>Mempool: Control block
-    Mempool->>Allocator: allocator_malloc(real_size × count)
-    Allocator-->>Mempool: Buffer
-    Mempool->>Buffer: Thread pointers through buffer
-    Mempool->>Mempool: Initialize free_list = buffer
-    Mempool-->>Caller: Return pool handle
-```
-
-**Implementation:**
-
-```c
-mempool_t* mempool_create(size_t item_size, size_t count) {
-    /* Ensure item_size is at least pointer-sized and aligned */
-    size_t real_size = item_size;
-    if (real_size < sizeof(void*)) {
-        real_size = sizeof(void*);
-    }
-    real_size = ALIGN(real_size);
-
-    /* Allocate control block */
-    mempool_t *pool = allocator_malloc(sizeof(mempool_t));
-    if (!pool) return NULL;
-
-    /* Allocate buffer */
-    pool->buffer = allocator_malloc(real_size * count);
-    if (!pool->buffer) {
-        allocator_free(pool);
-        return NULL;
-    }
-
-    pool->item_size = real_size;
-    pool->count = count;
-    spinlock_init(&pool->lock);
-
-    /* Initialize free list by threading pointers */
-    uint8_t *ptr = (uint8_t*)pool->buffer;
-    pool->free_list = ptr;
-
-    for (size_t i = 0; i < count - 1; i++) {
-        void **next_link = (void**)ptr;
-        *next_link = (ptr + real_size);  /* Link to next item */
-        ptr += real_size;
-    }
-    
-    /* Last item points to NULL */
-    *((void**)ptr) = NULL;
-
-    return pool;
-}
-```
+**Logic Flow:**
+1.  **Calculate Size:** Ensure `item_size` is at least `sizeof(void*)` and properly aligned.
+2.  **Allocate Control:** Allocate memory for the `mempool_t` structure.
+3.  **Allocate Buffer:** Allocate a contiguous block for `aligned_size * count` bytes.
+4.  **Initialize:** Set fields in `mempool_t`.
+5.  **Thread Pointers:** Iterate through the buffer and link each item to the next, creating the free list.
+6.  **Terminate:** Set the `next` pointer of the last item to `NULL`.
+7.  **Return:** Pointer to the initialized pool.
 
 **Pointer Threading Example:**
 
@@ -211,45 +159,15 @@ free_list = &Item 0
 
 ### Allocation
 
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant Mempool
-    participant FreeList
-
-    Caller->>Mempool: mempool_alloc(pool)
-    Mempool->>Mempool: spin_lock()
-    Mempool->>FreeList: Check if free_list != NULL
-    
-    alt Free Item Available
-        FreeList->>Mempool: Return free_list
-        Mempool->>FreeList: free_list = *((void**)ptr)
-        Mempool->>Mempool: spin_unlock()
-        Mempool-->>Caller: Return pointer
-    else Pool Empty
-        Mempool->>Mempool: spin_unlock()
-        Mempool-->>Caller: Return NULL
-    end
-```
-
-**Implementation:**
-
-```c
-void* mempool_alloc(mempool_t *pool) {
-    if (!pool) return NULL;
-
-    uint32_t flags = spin_lock(&pool->lock);
-
-    void *ptr = pool->free_list;
-    if (ptr) {
-        /* Move head to next free item */
-        pool->free_list = *((void**)ptr);
-    }
-
-    spin_unlock(&pool->lock, flags);
-    return ptr;
-}
-```
+**Logic Flow:**
+1.  **Lock:** Acquire spinlock.
+2.  **Check Free List:**
+    *   **If Not Empty:**
+        *   Get `ptr = pool->free_list`.
+        *   Update `pool->free_list` to point to the next item (`*ptr`).
+        *   Unlock and return `ptr`.
+    *   **If Empty:**
+        *   Unlock and return `NULL`.
 
 **Allocation Example:**
 
@@ -264,43 +182,13 @@ Return: Item 1 (now allocated)
 
 ### Deallocation
 
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant Mempool
-    participant FreeList
-
-    Caller->>Mempool: mempool_free(pool, ptr)
-    Mempool->>Mempool: Validate ptr is in pool range
-    Mempool->>Mempool: spin_lock()
-    Mempool->>FreeList: *((void**)ptr) = free_list
-    Mempool->>FreeList: free_list = ptr
-    Mempool->>Mempool: spin_unlock()
-    Mempool-->>Caller: Return
-```
-
-**Implementation:**
-
-```c
-void mempool_free(mempool_t *pool, void *ptr) {
-    if (!pool || !ptr) return;
-
-    /* Validate pointer is within pool range */
-    uintptr_t start = (uintptr_t)pool->buffer;
-    uintptr_t end = start + (pool->count * pool->item_size);
-    uintptr_t p = (uintptr_t)ptr;
-
-    if (p < start || p >= end) return;
-
-    uint32_t flags = spin_lock(&pool->lock);
-
-    /* Push onto head of free list */
-    *((void**)ptr) = pool->free_list;
-    pool->free_list = ptr;
-
-    spin_unlock(&pool->lock, flags);
-}
-```
+**Logic Flow:**
+1.  **Validate:** Ensure pointer is within the pool's buffer range.
+2.  **Lock:** Acquire spinlock.
+3.  **Insert:**
+    *   Set `*ptr` (embedded next pointer) to `pool->free_list`.
+    *   Update `pool->free_list` to `ptr`.
+4.  **Unlock:** Release spinlock.
 
 **Deallocation Example:**
 
@@ -499,23 +387,7 @@ void timer_delete(sw_timer_t *timer) {
 
 ---
 
-## API Reference
 
-| Function | Description | Thread Safe? | Time Complexity |
-|:---------|:------------|:-------------|:----------------|
-| `mempool_create` | Create a memory pool | No (call at init) | $O(N)$ |
-| `mempool_alloc` | Allocate an item | Yes | $O(1)$ |
-| `mempool_free` | Free an item | Yes | $O(1)$ |
-| `mempool_delete` | Delete pool | Yes | $O(1)$ |
-
-**Function Signatures:**
-
-```c
-mempool_t* mempool_create(size_t item_size, size_t count);
-void* mempool_alloc(mempool_t *pool);
-void mempool_free(mempool_t *pool, void *ptr);
-void mempool_delete(mempool_t *pool);
-```
 
 ---
 

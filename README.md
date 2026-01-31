@@ -3,13 +3,14 @@
 **A lightweight, preemptive Real-Time Operating System written from scratch.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-STM32L476-green.svg)
-![Architecture](https://img.shields.io/badge/arch-ARM%20Cortex--M4-orange.svg)
+![Platform](https://img.shields.io/badge/platform-Embedded%20Systems-green.svg)
+![Architecture](https://img.shields.io/badge/arch-Cross--Platform-orange.svg)
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Key Features](#key-features)
+- [Supported Platforms](#supported-platforms)
 - [Architecture](#architecture)
 - [Kernel Components](#kernel-components)
   - [Scheduler](#scheduler)
@@ -29,13 +30,13 @@
 
 ## Overview
 
-soRTOS is a real-time operating system kernel built from scratch in C. It was designed to deeply understand OS internals—scheduling algorithms, context switching, memory management, and synchronization primitives.
+soRTOS is a real-time operating system built from scratch in C. It was designed to deeply understand OS internals—scheduling algorithms, context switching, memory management, synchronization primitives, and hardware abstraction.
 
-While the current implementation targets the **STM32L476RG (ARM Cortex-M4)**, the kernel itself is **platform-agnostic**. The architecture strictly separates core kernel logic from hardware-specific drivers and assembly code, making it straightforward to port to different architectures (RISC-V, AVR, etc.).
+The entire system is **platform-agnostic**, with clean separation between core kernel logic, hardware drivers, and architecture-specific code. While it currently includes support for STM32l476rg (ARM Cortex-M4) and native simulation, the modular design makes it straightforward to port to different architectures.
 
 ### Design Philosophy
 
-*   **Deterministic Performance:** All kernel operations have guaranteed time complexity (typically O(1))
+*   **Deterministic Performance:** All kernel operations have guaranteed time complexity
 *   **Real-Time Ready:** Designed for systems requiring predictable timing behavior
 *   **Memory Efficient:** Minimal overhead with configurable resource limits
 *   **Modular Architecture:** Clean separation between kernel, architecture, and platform layers
@@ -67,6 +68,26 @@ While the current implementation targets the **STM32L476RG (ARM Cortex-M4)**, th
 *   **Software Timers:** High-precision tick-based timers (one-shot and periodic)
 *   **Logger:** Deferred, non-blocking logging system with history buffer
 *   **CLI:** Full-featured command-line interface with history and VT100 support
+
+---
+
+## Supported Platforms
+
+soRTOS is designed to be highly portable and currently supports the following platforms:
+
+### Embedded Targets
+*   **STM32L476RG** - ARM Cortex-M4 microcontroller
+*   *More platforms coming soon...*
+
+### Development & Testing
+*   **Native Host** - x86/x64 Linux/macOS simulation for development and unit testing
+
+### Planned Platforms
+*   **RISC-V** - Support for RISC-V based microcontrollers
+*   **AVR** - 8-bit AVR microcontroller family
+*   **ESP32** - Dual-core Xtensa LX6 microcontroller
+
+The modular architecture makes adding new platform support straightforward - only the `arch/` and `platform/` directories need platform-specific implementations.
 
 ---
 
@@ -275,11 +296,11 @@ soRTOS/
 │   └── project_config.h
 ├── docs/                   # Documentation
 │   ├── kernel/            # In-depth kernel documentation
+│   ├── drivers/           # Hardware driver documentation
 │   └── data_sheets/       # Hardware reference manuals
 ├── drivers/                # Hardware drivers
 │   ├── interface/         # Driver interfaces
-│   ├── src/               # Generic driver implementations
-│   └── stm32/             # STM32-specific drivers
+│   └── src/               # Generic driver implementations
 ├── kernel/                 # Core kernel (platform-agnostic)
 │   ├── include/           # Public headers
 │   └── src/               # Implementation
@@ -303,19 +324,27 @@ soRTOS/
 
 ### Prerequisites
 
-*   **`arm-none-eabi-gcc`**: ARM cross-compiler for STM32 builds
-*   **`gcc`**: Standard compiler for native host tests
-*   **`openocd`**: On-Chip Debugger for flashing
+*   **`arm-none-eabi-gcc`**: ARM cross-compiler for embedded targets
+*   **`gcc`**: Standard compiler for native host builds and testing
+*   **`openocd`**: On-Chip Debugger for flashing (optional)
 *   **`make`**: Build system
 
 ### Building the Project
 
-#### Build for Target (STM32)
+#### Native Build (Host Simulation)
 
-Compiles the kernel, drivers, and application code into an ELF file for the STM32L476RG board:
+Build and run on your development machine for testing and development:
 
 ```bash
-make
+make native
+```
+
+#### Cross-Compilation Build (Embedded Target)
+
+Compiles the kernel, drivers, and application code into an ELF file for embedded targets:
+
+```bash
+make PLATFORM=stm32l476rg
 ```
 
 #### Flash to Board
@@ -326,7 +355,7 @@ Flash the compiled binary to the target board:
 make load
 ```
 
-#### Run Unit Tests (Host)
+#### Run Unit Tests
 
 Run unit tests on the native host platform:
 
@@ -424,6 +453,24 @@ Comprehensive documentation is available for all kernel components:
 *   **[CLI](docs/kernel/cli.md)** - Command-line interface
 *   **[Utils](docs/kernel/utils.md)** - Utility functions
 
+### Hardware Drivers
+
+*   **[ADC](docs/drivers/adc.md)** - Analog-to-digital converter
+*   **[Button](docs/drivers/button.md)** - User button with debouncing
+*   **[DAC](docs/drivers/dac.md)** - Digital-to-analog converter
+*   **[DMA](docs/drivers/dma.md)** - Direct memory access controller
+*   **[EXTI](docs/drivers/exti.md)** - External interrupts
+*   **[Flash](docs/drivers/flash.md)** - Internal flash memory programming
+*   **[GPIO](docs/drivers/gpio.md)** - General purpose I/O pins
+*   **[I2C](docs/drivers/i2c.md)** - I2C communication bus
+*   **[LED](docs/drivers/led.md)** - LED control
+*   **[PWM](docs/drivers/pwm.md)** - Pulse width modulation
+*   **[RTC](docs/drivers/rtc.md)** - Real-time clock
+*   **[SPI](docs/drivers/spi.md)** - SPI communication bus
+*   **[SysTick](docs/drivers/systick.md)** - System tick timer
+*   **[UART](docs/drivers/uart.md)** - UART serial communication
+*   **[Watchdog](docs/drivers/watchdog.md)** - Independent watchdog timer
+
 ### Documentation Style
 
 All documentation follows a consistent structure:
@@ -442,14 +489,3 @@ All documentation follows a consistent structure:
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ---
-
-## Acknowledgments
-
-soRTOS was built as a learning project to deeply understand operating system internals. It draws inspiration from:
-
-*   Linux kernel's CFS (Completely Fair Scheduler)
-*   FreeRTOS synchronization primitives
-*   TLSF memory allocator research
-*   Various RTOS implementations
-
-Special thanks to the embedded systems and OS development communities for their excellent resources and documentation.

@@ -27,6 +27,12 @@ uint32_t systick_get_ticks(void);
  */
 void systick_delay_ticks(uint32_t ticks);
 
+/**
+ * @brief Core SysTick handler called by the ISR/HAL.
+ * Increments the tick counter and runs the scheduler.
+ */
+void systick_core_tick(void);
+
 #ifdef __cplusplus
 }
 #endif

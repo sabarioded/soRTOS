@@ -268,38 +268,31 @@ $$
 #### Operations
 
 **Insert (Heap-Up):**
-```mermaid
-graph TD
-    A[Insert at end] --> B[Compare with parent]
-    B --> C{vruntime < parent?}
-    C -->|Yes| D[Swap with parent]
-    D --> B
-    C -->|No| E[Done]
-```
+**Logic Flow:**
+1.  **Append:** Add new task to the end of the array.
+2.  **Compare:** Check if `vruntime` < parent's `vruntime`.
+3.  **Swap:** If smaller, swap with parent.
+4.  **Repeat:** Continue comparing/swapping up the tree until heap property is satisfied or root is reached.
 
 Time complexity: $O(\log N)$
 
 **Extract-Min (Heap-Down):**
-```mermaid
-graph TD
-    A[Remove root] --> B[Move last to root]
-    B --> C[Compare with children]
-    C --> D{vruntime > min_child?}
-    D -->|Yes| E[Swap with min_child]
-    E --> C
-    D -->|No| F[Done]
-```
+**Logic Flow:**
+1.  **Remove:** Take the root node (min task).
+2.  **Replace:** Move the last task in the array to the root position.
+3.  **Compare:** Check against children.
+4.  **Swap:** If `vruntime` > smallest child, swap with that child.
+5.  **Repeat:** Continue swapping down until heap property is satisfied.
 
 Time complexity: $O(\log N)$
 
 **Remove from middle:**
-```mermaid
-graph TD
-    A[Mark index] --> B[Move last to position]
-    B --> C[Try Heap-Up]
-    C --> D[Try Heap-Down]
-    D --> E[Done]
-```
+**Logic Flow:**
+1.  **Locate:** Identify the index of the task to remove.
+2.  **Replace:** Move the last task in the array to this index.
+3.  **Rebalance:**
+    *   **Try Heap-Up:** If new task < parent, bubble up.
+    *   **Try Heap-Down:** If new task > children, bubble down.
 
 Time complexity: $O(\log N)$
 
@@ -314,40 +307,27 @@ Array-based heap provides better cache locality than pointer-based trees:
 
 The sleep list is a **sorted singly-linked list** ordered by wake-up time.
 
-```mermaid
-graph LR
-    Head["Head"] --> T1["Task 1<br/>wake: 100"]
-    T1 --> T2["Task 2<br/>wake: 150"]
-    T2 --> T3["Task 3<br/>wake: 200"]
-    T3 --> NULL["NULL"]
-```
+**Structure:**
+*   **Head:** Points to the first task (earliest wake time).
+*   **Nodes:** Singly-linked list of tasks.
+*   **Ordering:** Strictly sorted by `wake_time` (ascending).
+*   Example: `Head -> Task1(wake:100) -> Task2(wake:150) -> Task3(wake:200) -> NULL`
 
 #### Insertion Algorithm
 
-```c
-if (list_empty || new_task->wake_time < head->wake_time) {
-    insert_at_head();
-} else {
-    // Find insertion point
-    while (curr->next && curr->next->wake_time < new_task->wake_time) {
-        curr = curr->next;
-    }
-    insert_after(curr);
-}
-```
+**Logic Flow:**
+1.  **Check Head:** If list is empty or new task wakes sooner than head, insert at head.
+2.  **Traverse:** Else, walk the list until finding a task that wakes *after* the new task.
+3.  **Insert:** Place the new task before that task (maintaining sorted order).
 
 Time complexity: $O(N)$ worst case, but typically $O(1)$ if tasks sleep for similar durations.
 
 #### Wake-up Processing
 
-```c
-void process_sleep_list(uint32_t current_tick) {
-    while (head != NULL && head->wake_time <= current_tick) {
-        task = remove_head();
-        wake_task(task);
-    }
-}
-```
+**Logic Flow:**
+1.  **Check Head:** Evaluate if the head task's `wake_time` <= `current_tick`.
+2.  **Wake:** If expired, remove from head and wake the task.
+3.  **Repeat:** Continue checking the new head until no more expired tasks remain.
 
 Time complexity: $O(K)$ where $K$ is the number of tasks to wake.
 
@@ -555,35 +535,14 @@ spin_unlock(&cpu_sched[cpu].lock);
 
 In soRTOS, when a low-weight task holds a resource needed by a high-weight task, temporary weight boosting prevents priority inversion.
 
-```mermaid
-sequenceDiagram
-    participant LowTask as Low Weight Task (1)
-    participant Mutex as Mutex
-    participant HighTask as High Weight Task (10)
-    participant Sched as Scheduler
+**Logic Flow:**
+1.  **Block:** High-weight task attempts to lock mutex held by Low-weight task.
+2.  **Boost:** Mutex detects inversion and temporarily boosts Low task's weight to match High task.
+3.  **Run:** Low task runs with boosted priority, finishing its critical section quickly.
+4.  **Unlock:** Low task releases mutex and restores its original weight.
+5.  **Acquire:** High task is unblocked and acquires the lock.
 
-    LowTask->>Mutex: Lock (acquired)
-    HighTask->>Mutex: Lock (blocked)
-    Mutex->>LowTask: Boost weight to 10
-    Sched->>LowTask: Run with higher priority
-    LowTask->>Mutex: Unlock
-    Mutex->>LowTask: Restore weight to 1
-    Mutex->>HighTask: Unblock
-    HighTask->>Mutex: Lock (acquired)
-```
 
-Implementation:
-```c
-void task_boost_weight(task_t *t, uint8_t weight) {
-    if (weight > t->weight) {
-        t->weight = weight;  // Temporarily increase
-    }
-}
-
-void task_restore_base_weight(task_t *t) {
-    t->weight = t->base_weight;  // Restore original
-}
-```
 
 ### Vruntime Synchronization
 
@@ -789,21 +748,7 @@ Where:
 - $vruntime_{task}$ = Task's old vruntime (before blocking)
 - $vruntime_{min}$ = Current minimum vruntime in system (heap root)
 
-**Implementation:**
-```c
-void task_unblock(task_t *task) {
-    // Get current minimum vruntime from heap
-    uint64_t min_vruntime = get_min_vruntime();
-    
-    // Synchronize if task fell too far behind
-    if (VRUNTIME_LT(task->vruntime, min_vruntime)) {
-        task->vruntime = min_vruntime;
-    }
-    
-    // Insert into ready heap
-    heap_insert(task);
-}
-```
+
 
 ### Scenario 3: Priority Inversion Prevention
 
@@ -851,36 +796,7 @@ Timeline (ticks):
 | Medium task start | 50 ticks | 150 ticks | Delayed (correct!) |
 | Total system time | 400 ticks | 350 ticks | **12.5% faster** |
 
-#### Implementation Details
 
-```c
-// When High Task blocks on mutex held by Low Task:
-void mutex_block_with_inheritance(mutex_t *mutex, task_t *high_task) {
-    task_t *lock_holder = mutex->owner;
-    
-    // Boost lock holder to blocker's weight
-    if (high_task->weight > lock_holder->weight) {
-        task_boost_weight(lock_holder, high_task->weight);
-    }
-    
-    // Block the high priority task
-    task_block(high_task);
-}
-
-// When Low Task releases mutex:
-void mutex_unlock(mutex_t *mutex) {
-    task_t *lock_holder = mutex->owner;
-    
-    // Restore original weight
-    task_restore_base_weight(lock_holder);
-    
-    // Wake next waiter
-    task_t *next = mutex->wait_list;
-    if (next) {
-        task_unblock(next);
-    }
-}
-```
 
 ---
 

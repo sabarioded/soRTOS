@@ -35,7 +35,7 @@
   - [Heap Integrity Checking](#heap-integrity-checking)
   - [Statistics Collection](#statistics-collection)
   - [Common Error Codes](#common-error-codes)
-- [API Reference](#api-reference)
+
 - [Appendix: Code Snippets](#appendix-code-snippets)
 
 ---
@@ -152,38 +152,17 @@ The range 256-511 is divided into 32 equal slices:
 - **SL 15:** 376-383 bytes
 - **SL 31:** 504-511 bytes
 
-#### Visualizing Index Calculation
+**Example: Logic for 450 bytes**
 
-Let's calculate the indices for a block of **450 bytes** ($450 = 256 + 128 + 64 + 2$).
-Assume `SL_INDEX_COUNT_LOG2 = 5` (32 subdivisions).
-
-```mermaid
-graph TD
-    subgraph Binary_View ["Binary Representation: 450"]
-        Bits["... 0 1 1 1 0 0 0 0 1 0"]
-        BitIdx["... 9 8 7 6 5 4 3 2 1 0"]
-    end
-
-    subgraph FL_Logic ["First Level (FL)"]
-        FindMSB["Find MSB (Most Significant Bit)"]
-        FL_Result["FL = 8"]
-    end
-
-    subgraph SL_Logic ["Second Level (SL)"]
-        Extract["Extract 5 bits after MSB<br/>(Bits 7, 6, 5, 4, 3)"]
-        SL_Value["Value: 1 1 0 0 0"]
-        SL_Result["SL = 24"]
-    end
-
-    Bits --> FindMSB
-    FindMSB -->|Bit 8 is set| FL_Result
-    Bits --> Extract
-    Extract --> SL_Value
-    SL_Value --> SL_Result
-    
-    FL_Result --> Final["Index: blocks[8][24]"]
-    SL_Result --> Final
-```
+1.  **Binary:** `... 0 1 1 1 0 0 0 0 1 0`
+2.  **FL Calculation:**
+    *   Find MSB (Most Significant Bit): Bit 8 is set.
+    *   **Result:** `FL = 8`.
+3.  **SL Calculation:**
+    *   Extract `SL_INDEX_COUNT_LOG2` (e.g., 5) bits after the MSB: Bits 7, 6, 5, 4, 3.
+    *   Extracted Value: `1 1 0 0 0` (binary) = 24 (decimal).
+    *   **Result:** `SL = 24`.
+4.  **Final Index:** `blocks[8][24]`.
 
 #### Search Index Calculation
 
@@ -362,72 +341,18 @@ stateDiagram-v2
 
 The allocation algorithm follows these steps:
 
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant Malloc
-    participant Lock
-    participant Bitmaps
-    participant FreeLists
-    participant Heap
+**Logic Flow:**
 
-    Caller->>Malloc: allocator_malloc(size)
-    Malloc->>Malloc: Calculate req_size<br/>(size + overhead, aligned)
-    Malloc->>Lock: spin_lock()
-    
-    Malloc->>Bitmaps: Calculate FL/SL indices
-    Bitmaps->>FreeLists: Search for block<br/>(O(1) via bitmaps)
-    
-    alt Block Found
-        FreeLists->>FreeLists: Remove from list
-        FreeLists->>Heap: Check if block too large
-        alt Block Too Large
-            Heap->>Heap: Split block
-            Heap->>FreeLists: Insert remainder
-        end
-        Heap->>Heap: Mark as USED
-        Lock->>Caller: spin_unlock()
-        Malloc-->>Caller: Return pointer
-    else No Block Found
-        Lock->>Caller: spin_unlock()
-        Malloc-->>Caller: Return NULL
-    end
-```
-
-**Detailed Steps:**
-
-1. **Size Calculation:**
-   ```c
-   size_t adjust = size + BLOCK_OVERHEAD;
-   size_t req_size = ALIGN(adjust);  // Align to platform boundary
-   ```
-
-2. **Block Search (O(1)):**
-   ```c
-   // Calculate search indices (rounds up)
-   mapping_indices_search(req_size, &fl, &sl);
-   
-   // Find first available block using bitmaps
-   block = block_locate_free(req_size);
-   ```
-
-3. **Block Removal:**
-   ```c
-   block_remove(block);  // Unlink from free list, update bitmaps
-   ```
-
-4. **Block Trimming:**
-   ```c
-   if (GET_SIZE(block) > req_size + BLOCK_MIN_SIZE) {
-       block_trim(block, req_size);  // Split, insert remainder
-   }
-   ```
-
-5. **Mark as Used:**
-   ```c
-   SET_USED(block);  // Clear FREE bit
-   return (void*)((uint8_t*)block + BLOCK_OVERHEAD);
-   ```
+1.  **Calculate Size:** Add block overhead to requested size and align to platform boundary.
+2.  **Search:**
+    *   Calculate FL and SL indices for the required size.
+    *   Use bitmaps to find the first *available* block that is large enough (O(1)).
+    *   If no block found, return `NULL`.
+3.  **Remove:** Unlink the found block from its free list and update bitmaps.
+4.  **Trim:** If the block is significantly larger than requested:
+    *   Split the block.
+    *   Insert the remainder back into the free list (updating bitmaps).
+5.  **Finalize:** Mark the allocated block as USED and return the pointer to the user data area.
 
 **Time Complexity:** $O(1)$ - Constant time regardless of heap state.
 
@@ -435,60 +360,13 @@ sequenceDiagram
 
 The deallocation algorithm performs immediate coalescing to prevent fragmentation:
 
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant Free
-    participant Lock
-    participant Heap
-    participant FreeLists
+**Logic Flow:**
 
-    Caller->>Free: allocator_free(ptr)
-    Free->>Free: Calculate block address<br/>(ptr - BLOCK_OVERHEAD)
-    Free->>Lock: spin_lock()
-    
-    Free->>Heap: Mark block as FREE
-    Free->>Heap: Merge with prev_phys_block<br/>(if free)
-    Free->>Heap: Merge with next block<br/>(if free)
-    
-    Free->>FreeLists: Calculate FL/SL indices
-    FreeLists->>FreeLists: Insert into appropriate list
-    FreeLists->>FreeLists: Update bitmaps
-    
-    Lock->>Caller: spin_unlock()
-    Free-->>Caller: Return
-```
-
-**Detailed Steps:**
-
-1. **Block Identification:**
-   ```c
-   block_header_t *block = (block_header_t*)((uint8_t*)ptr - BLOCK_OVERHEAD);
-   ```
-
-2. **Mark as Free:**
-   ```c
-   SET_FREE(block);  // Set FREE bit
-   ```
-
-3. **Coalesce with Previous Block:**
-   ```c
-   if (block->prev_phys_block && IS_FREE(block->prev_phys_block)) {
-       block = block_merge_prev(block);
-       // Removes prev from free list, extends prev to cover block
-   }
-   ```
-
-4. **Coalesce with Next Block:**
-   ```c
-   block = block_merge_next(block);
-   // Checks if next block is free, merges if so
-   ```
-
-5. **Insert into Free List:**
-   ```c
-   block_insert(block);  // Calculate FL/SL, insert, update bitmaps
-   ```
+1.  **Identify:** Calculate the block header address from the user pointer (`ptr - OVERHEAD`).
+2.  **Mark Free:** Set the block's state to FREE.
+3.  **Coalesce Left:** Check `prev_phys_block`. If it is free, merge the current block into it.
+4.  **Coalesce Right:** Check the physically next block. If it is free, merge it into the current block.
+5.  **Insert:** Calculate FL/SL indices for the (potentially larger) free block and insert it into the appropriate free list. Update bitmaps.
 
 **Coalescing Example:**
 
@@ -510,61 +388,23 @@ After free():
 
 The reallocation algorithm attempts to optimize in-place resizing:
 
-```mermaid
-stateDiagram-v2
-    [*] --> CheckPtr
-    CheckPtr --> Shrink: ptr != NULL<br/>new_size < current
-    CheckPtr --> Grow: ptr != NULL<br/>new_size > current
-    CheckPtr --> Malloc: ptr == NULL
-    CheckPtr --> Free: new_size == 0
-    
-    Shrink --> Split: Can split?
-    Split --> Return: Return same ptr
-    Shrink --> Return: Return same ptr
-    
-    Grow --> TryMerge: Try merge with next
-    TryMerge --> Split: Combined large enough?
-    TryMerge --> FullRealloc: Not enough
-    Split --> Return: Return same ptr
-    FullRealloc --> Malloc: Allocate new
-    Malloc --> Copy: Copy data
-    Copy --> Free: Free old
-    Free --> Return
-```
+**Logic Flow:**
 
-**Three Cases:**
-
-1. **Shrinking (new_size < current_size):**
-   ```c
-   if (curr_size >= req_size) {
-       if (curr_size - req_size >= BLOCK_MIN_SIZE) {
-           block_trim(block, req_size);  // Split, free remainder
-       }
-       return ptr;  // Same pointer
-   }
-   ```
-
-2. **Growing (new_size > current_size) - Try In-Place:**
-   ```c
-   block_header_t *next = (block_header_t*)((uint8_t*)block + curr_size);
-   if (IS_FREE(next)) {
-       size_t combined = curr_size + GET_SIZE(next);
-       if (combined >= req_size) {
-           // Merge with next, possibly trim
-           return ptr;  // Same pointer!
-       }
-   }
-   ```
-
-3. **Full Realloc (must move):**
-   ```c
-   void* new_ptr = allocator_malloc(new_size);
-   if (new_ptr) {
-       utils_memcpy(new_ptr, ptr, curr_size - BLOCK_OVERHEAD);
-       allocator_free(ptr);
-   }
-   return new_ptr;
-   ```
+1.  **Shrink (`new_size < current`):**
+    *   If the difference is large enough, split the block.
+    *   Free the remainder (in-place).
+    *   Return the same pointer.
+2.  **Grow (`new_size > current`) - Try In-Place:**
+    *   Check if the *next* physical block is free.
+    *   If `current + next >= new_size`, merge them.
+    *   Trim if necessary.
+    *   Return the same pointer.
+3.  **Grow (`new_size > current`) - Move:**
+    *   If in-place expansion is impossible:
+        *   Allocate a new block of `new_size`.
+        *   Copy data from old to new.
+        *   Free the old block.
+        *   Return the new pointer.
 
 **Time Complexity:**
 - **Shrink:** $O(1)$ - In-place split
@@ -575,130 +415,26 @@ stateDiagram-v2
 
 #### Block Insertion
 
-```c
-static void block_insert(block_header_t *block) {
-    uint32_t fl, sl;
-    mapping_indices_calc(GET_SIZE(block), &fl, &sl);
-    
-    // Insert at head of list (LIFO for cache locality)
-    block->next_free = control.blocks[fl][sl];
-    block->prev_free = NULL;
-    
-    if (block->next_free) {
-        block->next_free->prev_free = block;
-    }
-    
-    control.blocks[fl][sl] = block;
-    
-    // Update bitmaps
-    control.fl_bitmap |= (1 << fl);
-    control.sl_bitmap[fl] |= (1 << sl);
-}
-```
+#### Block Insertion
+*   Calculate FL and SL based on block size.
+*   Insert block at the **head** of the corresponding free list (LIFO).
+*   Set the corresponding bits in `fl_bitmap` and `sl_bitmap`.
 
 #### Block Removal
-
-```c
-static void block_remove(block_header_t *block) {
-    uint32_t fl, sl;
-    mapping_indices_calc(GET_SIZE(block), &fl, &sl);
-    
-    // Unlink from doubly-linked list
-    if (block->prev_free) {
-        block->prev_free->next_free = block->next_free;
-    } else {
-        control.blocks[fl][sl] = block->next_free;  // Was head
-    }
-    
-    if (block->next_free) {
-        block->next_free->prev_free = block->prev_free;
-    }
-    
-    // Clear bitmaps if list becomes empty
-    if (control.blocks[fl][sl] == NULL) {
-        control.sl_bitmap[fl] &= ~(1 << sl);
-        if (control.sl_bitmap[fl] == 0) {
-            control.fl_bitmap &= ~(1 << fl);
-        }
-    }
-}
-```
+*   Calculate FL and SL.
+*   Unlink block from the double-linked free list.
+*   If the list becomes empty, clear the bit in `sl_bitmap`.
+*   If `sl_bitmap` for that FL becomes zero, clear the bit in `fl_bitmap`.
 
 #### Block Merging
-
-**Merge with Previous:**
-```c
-static block_header_t* block_merge_prev(block_header_t *block) {
-    if (block->prev_phys_block && IS_FREE(block->prev_phys_block)) {
-        block_header_t *prev = block->prev_phys_block;
-        block_remove(prev);  // Remove from free list
-        
-        // Extend prev to cover block
-        prev->size += GET_SIZE(block);
-        
-        // Update next block's prev_phys_block pointer
-        block_header_t *next = (block_header_t*)((uint8_t*)prev + GET_SIZE(prev));
-        if ((void*)next < heap_end_ptr) {
-            next->prev_phys_block = prev;
-        }
-        
-        return prev;  // Return merged block
-    }
-    return block;
-}
-```
-
-**Merge with Next:**
-```c
-static block_header_t* block_merge_next(block_header_t *block) {
-    block_header_t *next = (block_header_t*)((uint8_t*)block + GET_SIZE(block));
-    
-    if ((void*)next < heap_end_ptr && IS_FREE(next)) {
-        block_remove(next);  // Remove from free list
-        
-        // Extend block to cover next
-        block->size += GET_SIZE(next);
-        
-        // Update block after next
-        block_header_t *next_next = (block_header_t*)((uint8_t*)block + GET_SIZE(block));
-        if ((void*)next_next < heap_end_ptr) {
-            next_next->prev_phys_block = block;
-        }
-    }
-    
-    return block;
-}
-```
+*   **Previous:** Remove previous block from free list, extend its size to include current block.
+*   **Next:** Remove next block from free list, extend current block's size to include next block.
 
 #### Block Trimming
-
-```c
-static void block_trim(block_header_t *block, size_t size) {
-    size_t remaining_size = GET_SIZE(block) - size;
-    
-    if (remaining_size >= BLOCK_MIN_SIZE) {
-        // Create new free block from remainder
-        block_header_t *remaining = (block_header_t*)((uint8_t*)block + size);
-        remaining->size = remaining_size | BLOCK_FREE_BIT;
-        remaining->prev_phys_block = block;
-        
-        // Update block size (mark as used)
-        block->size = size;
-        
-        // Update next block's prev_phys_block
-        block_header_t *next = (block_header_t*)((uint8_t*)remaining + GET_SIZE(remaining));
-        if ((void*)next < heap_end_ptr) {
-            next->prev_phys_block = remaining;
-        }
-        
-        // Try to merge remainder with next block
-        remaining = block_merge_next(remaining);
-        
-        // Insert remainder into free list
-        block_insert(remaining);
-    }
-}
-```
+*   Calculate remainder size.
+*   If remainder is large enough (`>= BLOCK_MIN_SIZE`), create a new free block header at the split point.
+*   Mark remainder as free and insert into free list (attempting merge with next block first).
+*   Update original block size to requested size.
 
 ---
 
@@ -718,21 +454,11 @@ static spinlock_t allocator_lock;
 
 **Critical Sections:**
 
-```c
-void* allocator_malloc(size_t size) {
-    // ... size calculation (no lock needed) ...
-    
-    uint32_t flags = spin_lock(&allocator_lock);
-    // All heap manipulation here
-    spin_unlock(&allocator_lock, flags);
-}
+**Critical Sections:**
 
-void allocator_free(void* ptr) {
-    uint32_t flags = spin_lock(&allocator_lock);
-    // All heap manipulation here
-    spin_unlock(&allocator_lock, flags);
-}
-```
+*   **Usage:** The spinlock is held for the duration of `malloc`, `free`, and `realloc`.
+*   **Protection:** Prevents concurrent access to the free lists and block headers.
+*   **ISR Safety:** Safe to call from ISRs (spinlock disabled interrupts locally).
 
 **Lock Ordering:**
 
@@ -1172,33 +898,7 @@ void heap_health_check(void) {
 
 ---
 
-## API Reference
 
-| Function | Description | Thread Safe? | Time Complexity |
-|:---------|:------------|:-------------|:----------------|
-| `allocator_init` | Initialize heap from memory pool | No (call once at startup) | $O(1)$ |
-| `allocator_malloc` | Allocate memory block | Yes | $O(1)$ |
-| `allocator_free` | Free memory block | Yes | $O(1)$ |
-| `allocator_realloc` | Resize memory block | Yes | $O(1)$ or $O(N)$ |
-| `allocator_get_free_size` | Get total free memory | Yes | $O(1)$ |
-| `allocator_get_fragment_count` | Get number of free blocks | Yes | $O(1)$ |
-| `allocator_is_heap_pointer` | Check if pointer is in heap | Yes | $O(1)$ |
-| `allocator_get_stats` | Get detailed heap statistics | Yes | $O(1)$ |
-| `allocator_check_integrity` | Verify heap integrity | Yes | $O(M + L)$ |
-
-**Function Signatures:**
-
-```c
-void allocator_init(uint8_t* pool, size_t size);
-void* allocator_malloc(size_t size);
-void allocator_free(void* ptr);
-void* allocator_realloc(void* ptr, size_t new_size);
-size_t allocator_get_free_size(void);
-size_t allocator_get_fragment_count(void);
-int allocator_is_heap_pointer(void *ptr);
-int allocator_get_stats(heap_stats_t *stats);
-int allocator_check_integrity(void);
-```
 
 ---
 

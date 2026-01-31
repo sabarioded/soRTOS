@@ -10,34 +10,17 @@ extern "C" {
 /**
  * @brief GPIO Port identifiers.
  */
-typedef enum {
-    GPIO_PORT_A,
-    GPIO_PORT_B,
-    GPIO_PORT_C,
-    GPIO_PORT_D,
-    GPIO_PORT_E,
-    GPIO_PORT_H,
-    GPIO_PORT_MAX
-} gpio_port_t;
+typedef uint8_t gpio_port_t;
 
 /**
  * @brief GPIO Pin Modes.
  */
-typedef enum {
-    GPIO_MODE_INPUT = 0,
-    GPIO_MODE_OUTPUT,
-    GPIO_MODE_AF,
-    GPIO_MODE_ANALOG
-} gpio_mode_t;
+typedef uint8_t gpio_mode_t;
 
 /**
  * @brief GPIO Pull-up/Pull-down configurations.
  */
-typedef enum {
-    GPIO_PULL_NONE = 0,
-    GPIO_PULL_UP,
-    GPIO_PULL_DOWN
-} gpio_pull_t;
+typedef uint8_t gpio_pull_t;
 
 /**
  * @brief Initialize a GPIO pin.

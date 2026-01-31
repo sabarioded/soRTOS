@@ -1,0 +1,65 @@
+#include "unity.h"
+#include "i2c.h"
+#include "mock_drivers.h"
+#include "allocator.h"
+#include "test_common.h"
+#include <stdio.h>
+
+static void setUp_local(void) {
+    mock_drivers_reset();
+}
+
+static void tearDown_local(void) {
+}
+
+void test_i2c_create_should_InitHal(void) {
+    void* hal_handle = (void*)0x12C;
+    void* config = (void*)0x3000;
+
+    i2c_port_t port = i2c_create(hal_handle, config);
+    TEST_ASSERT_NOT_NULL(port);
+    TEST_ASSERT_EQUAL(1, mock_i2c_init_called);
+}
+
+void test_i2c_master_transmit_should_CallHal(void) {
+    void *hal_handle = (void*)0x12C;
+    void *config = (void*)0x3000;
+    size_t ctx_size = i2c_get_context_size();
+    uint8_t ctx_mem[ctx_size];
+    i2c_port_t port = i2c_init(ctx_mem, hal_handle, config);
+    
+    uint8_t data[] = {0x01, 0x02};
+    
+    mock_i2c_transmit_return = 0;
+    
+    int res = i2c_master_transmit(port, 0x50, data, 2);
+    TEST_ASSERT_EQUAL(0, res);
+}
+
+void test_i2c_master_receive_should_CallHal(void) {
+    void *hal_handle = (void*)0x12C;
+    void *config = (void*)0x3000;
+    size_t ctx_size = i2c_get_context_size();
+    uint8_t ctx_mem[ctx_size];
+    i2c_port_t port = i2c_init(ctx_mem, hal_handle, config);
+    
+    uint8_t buf[2];
+    
+    mock_i2c_receive_return = 0;
+    
+    int res = i2c_master_receive(port, 0x50, buf, 2);
+    TEST_ASSERT_EQUAL(0, res);
+}
+
+void run_i2c_tests(void) {
+    printf("\n=== Starting I2C Tests ===\n");
+
+    test_setUp_hook = setUp_local;
+    test_tearDown_hook = tearDown_local;
+    UnitySetTestFile("tests/test_i2c.c");
+    RUN_TEST(test_i2c_create_should_InitHal);
+    RUN_TEST(test_i2c_master_transmit_should_CallHal);
+    RUN_TEST(test_i2c_master_receive_should_CallHal);
+
+    printf("=== I2C Tests Complete ===\n");
+}

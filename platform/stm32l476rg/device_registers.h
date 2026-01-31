@@ -225,6 +225,7 @@ typedef struct {
 /************* NVIC definitions *****************/
 #define NVIC_ISER0              (*((volatile uint32_t *)(NVIC_BASE + 0x000)))
 #define NVIC_ISER1              (*((volatile uint32_t *)(NVIC_BASE + 0x004)))
+#define NVIC_IPR(irq)           (*((volatile uint8_t *)(NVIC_BASE + 0x300UL + (irq))))
 #define USART2_IRQn             38
 
 

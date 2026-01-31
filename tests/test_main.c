@@ -12,6 +12,20 @@ extern void run_utils_tests(void);
 extern void run_cli_tests(void);
 extern void run_event_group_tests(void);
 extern void run_mempool_tests(void);
+extern void run_watchdog_tests(void);
+extern void run_systick_tests(void);
+extern void run_button_tests(void);
+extern void run_led_tests(void);
+extern void run_uart_tests(void);
+extern void run_i2c_tests(void);
+extern void run_spi_tests(void);
+extern void run_dma_tests(void);
+extern void run_adc_tests(void);
+extern void run_exti_tests(void);
+extern void run_dac_tests(void);
+extern void run_pwm_tests(void);
+extern void run_rtc_tests(void);
+extern void run_flash_tests(void);
 
 /* Main entry point for the unit test executable */
 int main(void) {
@@ -29,6 +43,20 @@ int main(void) {
     run_cli_tests();
     run_event_group_tests();
     run_mempool_tests();
+    run_watchdog_tests();
+    run_systick_tests();
+    run_button_tests();
+    run_led_tests();
+    run_uart_tests();
+    run_i2c_tests();
+    run_spi_tests();
+    run_dma_tests();
+    run_adc_tests();
+    run_exti_tests();
+    run_dac_tests();
+    run_pwm_tests();
+    run_rtc_tests();
+    run_flash_tests();
 
     /* Return failure count (0 = success) */
     return UNITY_END();

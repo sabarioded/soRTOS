@@ -4,7 +4,7 @@
 
 - [Overview](#overview)
 - [Architecture](#architecture)
-- [API Reference](#api-reference)
+- [Function Reference](#function-reference)
   - [Register Polling](#register-polling)
   - [String Operations](#string-operations)
   - [Memory Operations](#memory-operations)
@@ -44,7 +44,7 @@ graph TD
 ---
 
 
-## API
+## Function Reference
 
 ### Register polling
 

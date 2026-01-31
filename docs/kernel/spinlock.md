@@ -20,7 +20,6 @@
 - [Example Scenarios](#example-scenarios)
   - [Scenario 1: Protecting Shared Data](#scenario-1-protecting-shared-data)
   - [Scenario 2: ISR and Task Synchronization](#scenario-2-isr-and-task-synchronization)
-- [API Reference](#api-reference)
 - [Appendix: Code Snippets](#appendix-code-snippets)
 
 ---
@@ -47,23 +46,43 @@ Spinlocks are particularly useful for:
 
 ## Architecture
 
+### Scenario A: Uncontended Acquisition
 ```mermaid
-graph TD
+graph LR
     subgraph CPU1[CPU 1]
-        Task1["<b>Task 1</b><br/>Trying to lock"]
-        Lock1["<b>Spinlock</b><br/>flag: 1<br/>(locked)"]
+        TaskA["<b>Task A</b><br/>Attempts to Lock"]
+    end
+    
+    subgraph SharedMemory[Shared Memory]
+        Spinlock["<b>Spinlock</b><br/>flag: 0 (Unlocked)"]
     end
 
+    TaskA -- "Atomic Test-and-Set" --> Spinlock
+    Spinlock -.-> |"Success (0->1)"| TaskA
+    style Spinlock fill:#ccffcc,stroke:#333,color:black
+```
+
+### Scenario B: Contention (Spinning)
+```mermaid
+graph LR
     subgraph CPU2[CPU 2]
-        Task2["<b>Task 2</b><br/>Holds lock"]
-        Lock2["<b>Spinlock</b><br/>flag: 1<br/>(locked)"]
+        TaskB["<b>Task B</b><br/>Holds Lock"]
     end
 
-    Task1 -->|spin_lock| Lock1
-    Task1 -->|Spinning...| Lock1
-    Task2 -->|spin_unlock| Lock2
-    Lock2 -->|flag = 0| Lock1
-    Lock1 -->|Acquired| Task1
+    subgraph SharedMemory[Shared Memory]
+        Spinlock["<b>Spinlock</b><br/>flag: 1 (Locked)"]
+    end
+
+    subgraph CPU1[CPU 1]
+        TaskA["<b>Task A</b><br/>Attempts to Lock"]
+    end
+
+    TaskB --- Spinlock
+    TaskA -- "Atomic Test-and-Set" --> Spinlock
+    Spinlock -.-> |"Fail (1->1)"| TaskA
+    TaskA -- "Spin-Wait" --> TaskA
+    
+    style Spinlock fill:#ffcccc,stroke:#333,color:black
 ```
 
 ---
@@ -92,54 +111,18 @@ typedef struct {
 
 ### Lock Acquisition
 
-```mermaid
-sequenceDiagram
-    participant Task
-    participant ArchOps
-    participant Spinlock
-    participant OtherCPU
+**Logic Flow:**
 
-    Task->>ArchOps: arch_irq_lock()
-    ArchOps-->>Task: flags (interrupt state)
-    
-    alt SMP System
-        loop Lock Not Available
-            Task->>Spinlock: arch_test_and_set(&lock->flag)
-            Spinlock-->>Task: Previous value
-            
-            alt Lock Acquired (was 0)
-                Note over Task: Lock acquired!
-            else Lock Held (was 1)
-                Task->>ArchOps: arch_cpu_relax()
-                Note over Task: Spin and retry
-            end
-        end
-    else Uniprocessor
-        Note over Task: Lock acquired (no contention)
-    end
-    
-    Task->>Task: Critical section
-```
+1.  **Disable Interrupts:** `flags = arch_irq_lock()`
+    *   *Prevents context switches and ISR interference on the local CPU.*
+2.  **Atomic Attempt:** `if (atomic_test_and_set(lock->flag) == 0)`
+    *   *Success:* Lock acquired. Proceed to critical section.
+3.  **Spin (if failed):** `while (lock->flag == 1)`
+    *   *Busy-wait:* Loop continuously reading the flag.
+    *   *Relax:* Execute `arch_cpu_relax()` to save power/pipeline resources.
+4.  **Retry:** Once flag reads as 0, go back to Step 2.
 
-**Implementation:**
 
-```c
-static inline uint32_t spin_lock(spinlock_t *lock) {
-    /* Always disable local interrupts first */
-    uint32_t flags = arch_irq_lock();
-    
-#if defined(CONFIG_SMP)
-    /* Atomic spin wait on SMP */
-    while (arch_test_and_set(&lock->flag)) {
-        arch_cpu_relax();  /* Hint to CPU for power efficiency */
-    }
-#else
-    (void)lock;  /* Uniprocessor: no contention possible */
-#endif
-    
-    return flags;  /* Return interrupt state for unlock */
-}
-```
 
 **Key Points:**
 
@@ -150,35 +133,16 @@ static inline uint32_t spin_lock(spinlock_t *lock) {
 
 ### Lock Release
 
-```mermaid
-sequenceDiagram
-    participant Task
-    participant ArchOps
-    participant Spinlock
+**Logic Flow:**
 
-    Task->>Task: End of critical section
-    Task->>ArchOps: arch_memory_barrier()
-    ArchOps->>Spinlock: lock->flag = 0
-    Task->>ArchOps: arch_irq_unlock(flags)
-    ArchOps-->>Task: Interrupts restored
-```
+1.  **Memory Barrier:** `arch_memory_barrier()`
+    *   *Ensures all critical section writes are visible to other CPUs before unlocking.*
+2.  **Unlock:** `lock->flag = 0`
+    *   *Atomic write to release the lock.*
+3.  **Restore Interrupts:** `arch_irq_unlock(flags)`
+    *   *Re-enables interrupts (if they were enabled before locking).*
 
-**Implementation:**
 
-```c
-static inline void spin_unlock(spinlock_t *lock, uint32_t flags) {
-#if defined(CONFIG_SMP)
-    /* Release lock with memory barrier */
-    arch_memory_barrier(); 
-    lock->flag = 0;
-#else
-    (void)lock;  /* Uniprocessor: no-op */
-#endif
-    
-    /* Restore interrupts */
-    arch_irq_unlock(flags);
-}
-```
 
 **Key Points:**
 
@@ -393,26 +357,6 @@ void uart_task(void *arg) {
     }
 }
 ```
-
----
-
-## API Reference
-
-| Function | Description | ISR Safe? | Time Complexity |
-|:---------|:------------|:----------|:----------------|
-| `spinlock_init` | Initialize spinlock | Yes | $O(1)$ |
-| `spin_lock` | Acquire lock | Yes | $O(1)$ or $O(\infty)$ |
-| `spin_unlock` | Release lock | Yes | $O(1)$ |
-
-**Function Signatures:**
-
-```c
-static inline void spinlock_init(spinlock_t *lock);
-static inline uint32_t spin_lock(spinlock_t *lock);
-static inline void spin_unlock(spinlock_t *lock, uint32_t flags);
-```
-
-**Note:** These are `static inline` functions, so they're defined in the header file and compiled into the calling code.
 
 ---
 

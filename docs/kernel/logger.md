@@ -21,7 +21,7 @@
   - [Scenario 2: Live Logging Mode](#scenario-2-live-logging-mode)
   - [Scenario 3: Log History Dump](#scenario-3-log-history-dump)
 - [CLI Integration](#cli-integration)
-- [API Reference](#api-reference)
+
 - [Appendix: Code Snippets](#appendix-code-snippets)
 
 ---
@@ -125,84 +125,28 @@ static uint32_t log_count = 0;  /* Total items in buffer */
 
 ### Logging Flow
 
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant Logger
-    participant Queue
-    participant LoggerTask
-    participant History
-    participant CLI
+**Logic Flow:**
 
-    Caller->>Logger: logger_log(fmt, arg1, arg2)
-    Logger->>Logger: Create log_entry_t<br/>(timestamp, fmt, arg1, arg2)
-    Logger->>Queue: queue_push_from_isr(entry)
-    Queue-->>Logger: Success (non-blocking)
-    Logger-->>Caller: Return immediately
-
-    Note over LoggerTask: Background processing
-    LoggerTask->>Queue: queue_pop(entry)
-    Queue-->>LoggerTask: Log entry
-    
-    LoggerTask->>History: Save to circular buffer
-    LoggerTask->>LoggerTask: Check live mode
-    
-    alt Live Mode ON
-        LoggerTask->>CLI: Print immediately<br/>[timestamp] fmt
-    else Live Mode OFF
-        LoggerTask->>LoggerTask: Store only
-    end
-```
-
-**Implementation:**
-
-```c
-void logger_log(const char *fmt, uintptr_t arg1, uintptr_t arg2) {
-    if (!log_queue) return;
-
-    log_entry_t entry;
-    entry.timestamp = (uint32_t)platform_get_ticks();
-    entry.fmt = fmt;
-    entry.arg1 = arg1;
-    entry.arg2 = arg2;
-
-    /* Use ISR version to avoid blocking */
-    queue_push_from_isr(log_queue, &entry);
-}
-```
+1.  **Caller:** Invokes `logger_log(fmt, arg1, arg2)`.
+2.  **Filter:** Checks if `LOG_ENABLE` is true and queue exists.
+3.  **Pack:** Creates a `log_entry_t` struct with current timestamp on the stack.
+4.  **Queue:** Pushes the entry to the `log_queue` using `queue_push_from_isr` (non-blocking).
+5.  **Return:** Returns immediately to caller (never blocks).
 
 ### History Management
 
 The logger task saves every log entry to the history buffer:
 
-```c
-static void logger_task_entry(void *arg) {
-    log_entry_t entry;
+**Logic Flow:**
 
-    while (1) {
-        /* Block until a log entry arrives */
-        if (queue_pop(log_queue, &entry) == 0) {
-            
-            /* Save to history buffer */
-            log_history[log_head] = entry;
-            log_head = (log_head + 1) % LOG_HISTORY_SIZE;
-            if (log_count < LOG_HISTORY_SIZE) {
-                log_count++;
-            }
+The Logger Task runs in the background at low priority:
 
-            /* If live mode is enabled, print immediately */
-            if (log_live) {
-                uint32_t time_sec = entry.timestamp / 1000;
-                uint32_t time_ms = entry.timestamp % 1000;
-                
-                cli_printf("[%u.%03u] ", time_sec, time_ms);
-                cli_printf(entry.fmt, entry.arg1, entry.arg2);
-                cli_printf("\r\n");
-            }
-        }
-    }
-}
-```
+1.  **Wait:** Blocks on `queue_pop` until a log entry arrives.
+2.  **Retrieve:** Pops the oldest log entry from the queue.
+3.  **Store:** Saves the entry into the circular `log_history` buffer (overwriting oldest if full).
+4.  **Live Output:** If **Live Mode** is active:
+    *   Formats the timestamp (seconds.ms).
+    *   Prints the formatted message to the CLI.
 
 **Circular Buffer Logic:**
 
@@ -448,21 +392,7 @@ Log cleared.
 
 ---
 
-## API Reference
 
-| Function | Description | Thread Safe? | ISR Safe? |
-|:---------|:------------|:-------------|:----------|
-| `logger_init` | Initialize logger system | No (call at startup) | No |
-| `logger_log` | Log a message | Yes | **Yes** |
-| `logger_get_queue` | Get logger queue (debug) | Yes | No |
-
-**Function Signatures:**
-
-```c
-void logger_init(void);
-void logger_log(const char *fmt, uintptr_t arg1, uintptr_t arg2);
-queue_t* logger_get_queue(void);
-```
 
 **Format String Limitations:**
 

@@ -21,14 +21,14 @@
   - [Scenario 1: Multiple Tasks Waiting for Different Events](#scenario-1-multiple-tasks-waiting-for-different-events)
   - [Scenario 2: Task Waiting for All Bits](#scenario-2-task-waiting-for-all-bits)
   - [Scenario 3: Event Group with Timeout](#scenario-3-event-group-with-timeout)
-- [API Reference](#api-reference)
+
 - [Appendix: Code Snippets](#appendix-code-snippets)
 
 ---
 
 ## Overview
 
-The soRTOS event group provides a **lightweight synchronization primitive** that allows tasks to wait for one or more event bits to be set. It's similar to FreeRTOS event groups and provides efficient multi-event synchronization without the overhead of multiple semaphores or condition variables.
+The soRTOS event group provides a **lightweight synchronization primitive** that allows tasks to wait for one or more event bits to be set. It provides efficient multi-event synchronization without the overhead of multiple semaphores or condition variables.
 
 Event groups are particularly useful for:
 *   **Task Coordination:** Multiple tasks can wait for different combinations of events
@@ -130,223 +130,52 @@ Each waiting task stores:
 
 ### Setting Bits
 
-When bits are set, the event group checks all waiting tasks to see if their conditions are satisfied:
-
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant EventGroup
-    participant WaitList
-    participant Task
-
-    Caller->>EventGroup: event_group_set_bits(bits)
-    EventGroup->>EventGroup: bits |= bits_to_set
-    EventGroup->>WaitList: Iterate through waiting tasks
-    
-    loop For each waiting task
-        WaitList->>EventGroup: Check if condition satisfied
-        alt Condition Met
-            EventGroup->>EventGroup: Remove from wait list
-            EventGroup->>EventGroup: Clear bits (if CLEAR_ON_EXIT)
-            EventGroup->>Task: task_unblock()
-        else Condition Not Met
-            EventGroup->>WaitList: Continue to next task
-        end
-    end
-    
-    EventGroup->>Caller: Return current bits value
-```
-
-**Implementation:**
-
-```c
-uint32_t event_group_set_bits(event_group_t *eg, uint32_t bits_to_set) {
-    uint32_t flags = spin_lock(&eg->lock);
-    
-    eg->bits |= bits_to_set;
-    uint32_t result = eg->bits;
-    
-    /* Check if any waiting tasks can be woken */
-    _check_and_wake_tasks(eg);
-    
-    spin_unlock(&eg->lock, flags);
-    return result;
-}
-```
+**Logic Flow:**
+1.  **Lock:** Acquire spinlock.
+2.  **Set Bits:** Perform bitwise OR: `group->bits |= bits_to_set`.
+3.  **Check Waiters:** Iterate through the list of waiting tasks.
+4.  **Evaluate:** For each task, check if its wait condition (ANY or ALL) is now met.
+5.  **Wake:** If satisfied:
+    *   Remove task from wait list.
+    *   Clear bits if `EVENT_CLEAR_ON_EXIT` was requested.
+    *   Unblock the task.
+6.  **Unlock:** Release spinlock.
 
 ### Waiting for Bits
 
 Tasks can wait for bits with different modes:
 
-```mermaid
-stateDiagram-v2
-    [*] --> CheckCondition
-    CheckCondition --> Satisfied: Condition met
-    CheckCondition --> Block: Condition not met
-    Block --> WaitList: Add to wait queue
-    WaitList --> SetBlocked: Set TASK_BLOCKED state
-    SetBlocked --> Unlock: Unlock event group
-    Unlock --> Sleep: task_sleep_ticks() or yield()
-    Sleep --> Woken: Bits set or timeout
-    Woken --> CheckSatisfied: Re-check condition
-    CheckSatisfied --> Satisfied: EVENT_SATISFIED_FLAG set
-    CheckSatisfied --> Timeout: Flag not set
-    Satisfied --> [*]
-    Timeout --> [*]
-```
-
-**Wait Modes:**
-
-1. **EVENT_WAIT_ANY:** Task wakes when **any** of the specified bits are set
-   ```c
-   if (eg->bits & bits_to_wait) {
-       satisfied = 1;
-   }
-   ```
-
-2. **EVENT_WAIT_ALL:** Task wakes when **all** of the specified bits are set
-   ```c
-   if ((eg->bits & bits_to_wait) == bits_to_wait) {
-       satisfied = 1;
-   }
-   ```
-
-**Implementation:**
-
-```c
-uint32_t event_group_wait_bits(event_group_t *eg, 
-                               uint32_t bits_to_wait, 
-                               uint8_t flags_param, 
-                               uint32_t timeout_ticks) {
-    task_t *current = task_get_current();
-    wait_node_t *node = task_get_wait_node(current);
-    
-    /* Store wait parameters in task */
-    task_set_event_wait(current, bits_to_wait, flags_param);
-    
-    uint32_t flags = spin_lock(&eg->lock);
-    
-    /* Check if condition already satisfied */
-    uint8_t satisfied = 0;
-    if (flags_param & EVENT_WAIT_ALL) {
-        if ((eg->bits & bits_to_wait) == bits_to_wait) {
-            satisfied = 1;
-        }
-    } else {
-        if (eg->bits & bits_to_wait) {
-            satisfied = 1;
-        }
-    }
-    
-    if (satisfied) {
-        /* Condition met, clear bits if requested */
-        if (flags_param & EVENT_CLEAR_ON_EXIT) {
-            eg->bits &= ~bits_to_wait;
-        }
-        spin_unlock(&eg->lock, flags);
-        return eg->bits;
-    }
-    
-    /* Not satisfied, add to wait list */
-    _add_waiter(&eg->wait_head, &eg->wait_tail, node);
-    
-    /* Handle timeout */
-    if (timeout_ticks == 0) {
-        /* Non-blocking check */
-        spin_unlock(&eg->lock, flags);
-        return eg->bits;
-    }
-    
-    /* Mark as blocked BEFORE unlocking to prevent lost wake-ups.
-     * If an ISR fires immediately after unlock and sets bits, the task
-     * must be in TASK_BLOCKED state so task_unblock() can wake it. */
-    task_set_state(current, TASK_BLOCKED);
-    spin_unlock(&eg->lock, flags);
-    
-    if (timeout_ticks > 0 && timeout_ticks != UINT32_MAX) {
-        /* Finite timeout: task_sleep_ticks will change state to TASK_SLEEPING */
-        task_sleep_ticks(timeout_ticks);
-    } else {
-        /* Infinite wait: already in TASK_BLOCKED state */
-        platform_yield();
-    }
-    
-    /* Woken up, check result */
-    flags = spin_lock(&eg->lock);
-    uint32_t result = 0;
-    
-    uint8_t out_flags = task_get_event_flags(current);
-    if (out_flags & EVENT_SATISFIED_FLAG) {
-        result = task_get_event_bits(current);
-    } else {
-        /* Timed out, remove from wait list */
-        _remove_waiter(&eg->wait_head, &eg->wait_tail, current);
-    }
-    
-    spin_unlock(&eg->lock, flags);
-    return result;
-}
-```
+**Logic Flow:**
+1.  **Lock:** Acquire spinlock.
+2.  **Check Condition:**
+    *   **Wait ANY:** Check if `(current_bits & wait_bits) != 0`.
+    *   **Wait ALL:** Check if `(current_bits & wait_bits) == wait_bits`.
+3.  **If Satisfied:**
+    *   Clear bits if `EVENT_CLEAR_ON_EXIT` is set.
+    *   Unlock and return current bits.
+4.  **If Not Satisfied:**
+    *   Store wait parameters (`bits_to_wait`, `flags`) in the task structure.
+    *   Add task to wait list.
+    *   Set state to `TASK_BLOCKED`.
+    *   Unlock and Yield.
+    *   *On wake-up*: Check if woken by event (success) or timeout.
 
 ### Wake-up Condition Evaluation
 
 When bits are set, the event group iterates through the wait list and evaluates each task's condition:
 
-```c
-static void _check_and_wake_tasks(event_group_t *eg) {
-    wait_node_t *curr = eg->wait_head;
-    wait_node_t *prev = NULL;
-    
-    while (curr) {
-        task_t *task = (task_t*)curr->task;
-        uint32_t bits_to_wait = task_get_event_bits(task);
-        uint8_t flags = task_get_event_flags(task);
-        uint8_t wait_all = (flags & EVENT_WAIT_ALL);
-        
-        uint8_t satisfied = 0;
-        
-        if (wait_all) {
-            /* All bits must be set */
-            if ((eg->bits & bits_to_wait) == bits_to_wait) {
-                satisfied = 1;
-            }
-        } else {
-            /* Any bit can satisfy */
-            if (eg->bits & bits_to_wait) {
-                satisfied = 1;
-            }
-        }
-        
-        if (satisfied) {
-            /* Remove from list */
-            wait_node_t *to_wake = curr;
-            curr = curr->next;
-            
-            if (prev) {
-                prev->next = to_wake->next;
-            } else {
-                eg->wait_head = to_wake->next;
-            }
-            
-            if (to_wake == eg->wait_tail) {
-                eg->wait_tail = prev;
-            }
-            
-            /* Clear bits if requested */
-            if (flags & EVENT_CLEAR_ON_EXIT) {
-                eg->bits &= ~bits_to_wait;
-            }
-            
-            /* Mark as satisfied and wake */
-            task_set_event_wait(task, eg->bits, flags | EVENT_SATISFIED_FLAG);
-            task_unblock(task);
-        } else {
-            prev = curr;
-            curr = curr->next;
-        }
-    }
-}
-```
+**Logic Flow:**
+1.  **Iterate:** Walk the linked list of waiting tasks.
+2.  **Retrieve:** For each task, get `bits_to_wait` and `flags` (Any/All).
+3.  **Check:** Compare current group bits (`eg->bits`) with task's `bits_to_wait`.
+4.  **Resolve:**
+    *   **If Satisfied:**
+        *   Remove from list.
+        *   Clear bits if `CLEAR_ON_EXIT` is set.
+        *   Update task's return info.
+        *   Call `task_unblock()`.
+    *   **If Not Satisfied:**
+        *   Proceed to next task.
 
 **Key Points:**
 
@@ -378,31 +207,20 @@ struct event_group {
 
 The `event_group_set_bits_from_isr()` function is safe to call from interrupt context:
 
-```c
-uint32_t event_group_set_bits_from_isr(event_group_t *eg, uint32_t bits_to_set) {
-    uint32_t flags = spin_lock(&eg->lock);
-    eg->bits |= bits_to_set;
-    _check_and_wake_tasks(eg);  /* Safe: task_unblock() is ISR-safe */
-    spin_unlock(&eg->lock, flags);
-    return eg->bits;
-}
-```
+The `event_group_set_bits_from_isr()` function is safe to call from interrupt context by modifying the bits and checking waiters within a spinlock. It avoids unsafe operations like context switching or blocking.
 
 **Lost Wake-up Prevention:**
 
 The wait operation uses careful locking to prevent lost wake-ups. The critical issue is ensuring the task state is set to `TASK_BLOCKED` **before** unlocking the event group lock:
 
-```c
-/* Mark as blocked BEFORE unlocking */
-task_set_state(current, TASK_BLOCKED);
-spin_unlock(&eg->lock, flags);
-
-if (timeout_ticks > 0 && timeout_ticks != UINT32_MAX) {
-    task_sleep_ticks(timeout_ticks);  /* Changes state to TASK_SLEEPING */
-} else {
-    platform_yield();  /* Already in TASK_BLOCKED state */
-}
-```
+**Mechanism:**
+1.  Task acquires lock.
+2.  Task computes new state (BLOCKED).
+3.  **Critical:** Task sets state to `BLOCKED` *before* releasing the lock.
+4.  Task releases lock.
+5.  Task yields/sleeps.
+    
+If an ISR fires between step 4 and 5, it sees the task is already `BLOCKED` and can successfully wake it up (making step 5 effectively a no-op or immediate return).
 
 **Why this matters:**
 
@@ -554,30 +372,7 @@ t=100: Timeout expires
 
 ---
 
-## API Reference
 
-| Function | Description | Thread Safe? | ISR Safe? |
-|:---------|:------------|:-------------|:----------|
-| `event_group_create` | Create new event group | No (call at init) | No |
-| `event_group_delete` | Delete event group | Yes | No |
-| `event_group_set_bits` | Set event bits | Yes | No |
-| `event_group_set_bits_from_isr` | Set bits from ISR | Yes | **Yes** |
-| `event_group_clear_bits` | Clear event bits | Yes | No |
-| `event_group_wait_bits` | Wait for bits | Yes | No |
-| `event_group_get_bits` | Get current bits | Yes | No |
-
-**Function Signatures:**
-
-```c
-event_group_t* event_group_create(void);
-void event_group_delete(event_group_t *eg);
-uint32_t event_group_set_bits(event_group_t *eg, uint32_t bits_to_set);
-uint32_t event_group_set_bits_from_isr(event_group_t *eg, uint32_t bits_to_set);
-uint32_t event_group_clear_bits(event_group_t *eg, uint32_t bits_to_clear);
-uint32_t event_group_wait_bits(event_group_t *eg, uint32_t bits_to_wait, 
-                               uint8_t flags, uint32_t timeout_ticks);
-uint32_t event_group_get_bits(event_group_t *eg);
-```
 
 **Wait Flags:**
 

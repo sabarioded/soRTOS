@@ -18,6 +18,11 @@
 #define UART_TX_BUFFER_SIZE    512    /* UART transmit buffer size */
 
 /* ============================================================================
+   Button Configuration
+   ============================================================================ */
+#define BUTTON_DEBOUNCE_MS     50     /* Debounce time in milliseconds */
+
+/* ============================================================================
    Scheduler Configuration
    ============================================================================ */
 #define MAX_CPUS               1      /* Maximum number of CPUs */

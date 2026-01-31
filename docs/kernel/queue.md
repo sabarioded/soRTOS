@@ -22,7 +22,7 @@
   - [Time Complexity](#time-complexity)
   - [Space Complexity](#space-complexity)
 - [Optimization Techniques](#optimization-techniques)
-- [API Reference](#api-reference)
+
 - [Example Scenarios](#example-scenarios)
   - [Scenario 1: Task-to-Task Communication](#scenario-1-task-to-task-communication)
   - [Scenario 2: ISR-to-Task Communication](#scenario-2-isr-to-task-communication)
@@ -124,47 +124,29 @@ When a task blocks, its pre-allocated `wait_node` is linked into the appropriate
 
 ### High-Level Flow
 
-```mermaid
-sequenceDiagram
-    participant Sender
-    participant Queue
-    participant Receiver
-    participant Scheduler
+**Queue Push (Blocking):**
+1.  **Acquire Lock:** `spin_lock()` the queue.
+2.  **Check Status:**
+    *   **Space Available:**
+        *   Copy data to buffer.
+        *   Wake waiting receiver (if any).
+        *   Release lock and **Return Success**.
+    *   **Queue Full:**
+        *   Add task to TX Wait List.
+        *   Release lock and **Block Task**.
+        *   Yield CPU (`platform_yield()`).
 
-    Note over Sender: queue_push(data)
-    Sender->>Queue: Acquire Lock
-    
-    alt Queue Full
-        Queue->>Queue: Add Sender to TX Wait List
-        Queue->>Sender: Block Task
-        Sender->>Scheduler: Yield
-    else Space Available
-        Queue->>Queue: Copy Data to Buffer
-        
-        opt RX Wait List not empty
-            Queue->>Receiver: Wake Receiver
-            Queue->>Scheduler: Mark Receiver READY
-        end
-    end
-    Queue->>Sender: Release Lock
-
-    Note over Receiver: queue_pop(&data)
-    Receiver->>Queue: Acquire Lock
-    
-    alt Queue Empty
-        Queue->>Queue: Add Receiver to RX Wait List
-        Queue->>Receiver: Block Task
-        Receiver->>Scheduler: Yield
-    else Data Available
-        Queue->>Queue: Copy Data from Buffer
-        
-        opt TX Wait List not empty
-            Queue->>Sender: Wake Sender
-            Queue->>Scheduler: Mark Sender READY
-        end
-    end
-    Queue->>Receiver: Release Lock
-```
+**Queue Pop (Blocking):**
+1.  **Acquire Lock:** `spin_lock()` the queue.
+2.  **Check Status:**
+    *   **Data Available:**
+        *   Copy data from buffer.
+        *   Wake waiting sender (if any).
+        *   Release lock and **Return Success**.
+    *   **Queue Empty:**
+        *   Add task to RX Wait List.
+        *   Release lock and **Block Task**.
+        *   Yield CPU (`platform_yield()`).
 
 ### Push Operation (Blocking)
 
@@ -266,21 +248,7 @@ q->tail = (q->tail + 1) % q->capacity;
 
 ---
 
-## API Reference
 
-| Function | Description | Blocking? | ISR Safe? |
-|:---|:---|:---|:---|
-| `queue_create` | Allocates queue and buffer | No | No |
-| `queue_delete` | Frees resources | No | No |
-| `queue_push` | Pushes item to back | **Yes** | No |
-| `queue_pop` | Pops item from front | **Yes** | No |
-| `queue_peek` | Reads front without removing | No | No |
-| `queue_push_from_isr` | Pushes item | No | **Yes** |
-| `queue_pop_from_isr` | Pops item | No | **Yes** |
-| `queue_push_arr` | Pushes multiple items | **Yes** | No |
-| `queue_reset` | Clears data, wakes writers | No | No |
-
----
 
 ## Example Scenarios
 

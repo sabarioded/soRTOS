@@ -49,14 +49,24 @@ ifeq ($(PLATFORM), stm32l476rg)
 	C_SRCS += \
 		$(PLATFORM_DIR)/stm32l476rg/platform.c \
 		$(PLATFORM_DIR)/stm32l476rg/memory_map.c \
-		$(DRIVERS_DIR)/stm32/uart.c \
-		$(DRIVERS_DIR)/stm32/gpio.c \
 		$(PLATFORM_DIR)/stm32l476rg/system_clock.c \
-		$(DRIVERS_DIR)/stm32/led.c \
-		$(DRIVERS_DIR)/stm32/button.c \
-		$(ARCH_DIR)/arm/cortex_m4/systick.c \
+		$(PLATFORM_DIR)/stm32l476rg/stm32l476_startup.c \
 		$(ARCH_DIR)/arm/cortex_m4/arch_ops.c \
-		$(PLATFORM_DIR)/stm32l476rg/stm32l476_startup.c
+		$(DRIVERS_DIR)/stm32/gpio.c \
+		$(DRIVERS_DIR)/src/uart.c \
+		$(DRIVERS_DIR)/src/led.c \
+		$(DRIVERS_DIR)/src/button.c \
+		$(DRIVERS_DIR)/src/systick.c \
+		$(DRIVERS_DIR)/src/i2c.c \
+		$(DRIVERS_DIR)/src/spi.c \
+		$(DRIVERS_DIR)/src/dma.c \
+		$(DRIVERS_DIR)/src/adc.c \
+		$(DRIVERS_DIR)/src/exti.c \
+		$(DRIVERS_DIR)/src/watchdog.c \
+		$(DRIVERS_DIR)/src/flash.c \
+		$(DRIVERS_DIR)/src/dac.c \
+		$(DRIVERS_DIR)/src/pwm.c \
+		$(DRIVERS_DIR)/src/rtc.c
 
 	ASM_SRCS += \
 		$(ARCH_DIR)/arm/cortex_m4/context_switch.S
@@ -64,7 +74,9 @@ ifeq ($(PLATFORM), stm32l476rg)
 	# Platform Includes
 	INCLUDES += \
 		-I$(PLATFORM_DIR)/stm32l476rg \
-		-I$(ARCH_DIR)/arm/cortex_m4
+		-I$(PLATFORM_DIR)/stm32l476rg/drivers \
+		-I$(ARCH_DIR)/arm/cortex_m4 \
+		-I$(ARCH_DIR)/arm/cortex_m4/drivers
 
 	# Linker
 	LDSCRIPT = $(PLATFORM_DIR)/stm32l476rg/stm32l476rg_flash.ld
@@ -81,11 +93,12 @@ endif
 # Native (Host) Platform Configuration
 ifeq ($(PLATFORM), native)
 	CC = gcc
-	CFLAGS = -std=gnu11 -g -O0 -Wall -Wextra -I$(ARCH_DIR)/native -I$(PLATFORM_DIR)/native $(INCLUDES) -DHOST_PLATFORM
+	CFLAGS = -std=gnu11 -g -O0 -Wall -Wextra -I$(ARCH_DIR)/native -I$(PLATFORM_DIR)/native -I$(PLATFORM_DIR)/native/drivers $(INCLUDES) -DHOST_PLATFORM
 	
 	# Native platform implementation
 	C_SRCS += $(PLATFORM_DIR)/native/platform.c \
-	          $(PLATFORM_DIR)/native/memory_map.c
+	          $(PLATFORM_DIR)/native/memory_map.c \
+	          $(PLATFORM_DIR)/native/drivers/native_hal.c
 	
 	LDFLAGS = 
 endif
@@ -123,7 +136,7 @@ endif
 
 # Unit Tests (Native)
 NATIVE_CC     = gcc
-NATIVE_CFLAGS = -std=gnu11 -g -Wall -I$(ARCH_DIR)/native -I$(PLATFORM_DIR)/native $(INCLUDES) -Iexternal/unity/src -DUNIT_TESTING -DHOST_PLATFORM
+NATIVE_CFLAGS = -std=gnu11 -g -Wall -Itests -I$(ARCH_DIR)/native -I$(PLATFORM_DIR)/native -I$(PLATFORM_DIR)/native/drivers $(INCLUDES) -Iexternal/unity/src -DUNIT_TESTING -DHOST_PLATFORM
 UNITY_SRC     = external/unity/src/unity.c
 
 TEST_SRCS     = tests/test_common.c \
@@ -139,6 +152,21 @@ TEST_SRCS     = tests/test_common.c \
 				tests/test_cli.c \
 				tests/test_event_group.c \
 				tests/test_mempool.c \
+				tests/test_drivers.c \
+				tests/test_watchdog.c \
+				tests/test_systick.c \
+				tests/test_button.c \
+				tests/test_led.c \
+				tests/test_uart.c \
+				tests/test_i2c.c \
+				tests/test_spi.c \
+				tests/test_dma.c \
+				tests/test_adc.c \
+				tests/test_exti.c \
+				tests/test_dac.c \
+				tests/test_pwm.c \
+				tests/test_rtc.c \
+				tests/test_flash.c \
                 $(ARCH_DIR)/native/arch_ops.c \
                 $(KERNEL_DIR)/src/queue.c \
                 $(KERNEL_DIR)/src/scheduler.c \
@@ -151,6 +179,19 @@ TEST_SRCS     = tests/test_common.c \
                 $(KERNEL_DIR)/src/timer.c \
                 $(KERNEL_DIR)/src/event_group.c \
 				$(KERNEL_DIR)/src/mempool.c \
+				$(DRIVERS_DIR)/src/systick.c \
+				$(DRIVERS_DIR)/src/button.c \
+				$(DRIVERS_DIR)/src/led.c \
+				$(DRIVERS_DIR)/src/uart.c \
+				$(DRIVERS_DIR)/src/i2c.c \
+				$(DRIVERS_DIR)/src/spi.c \
+				$(DRIVERS_DIR)/src/dma.c \
+				$(DRIVERS_DIR)/src/adc.c \
+				$(DRIVERS_DIR)/src/exti.c \
+				$(DRIVERS_DIR)/src/watchdog.c \
+				$(DRIVERS_DIR)/src/dac.c \
+				$(DRIVERS_DIR)/src/pwm.c \
+				$(DRIVERS_DIR)/src/rtc.c \
                 $(UNITY_SRC)
 TEST_BIN      = $(BUILD_DIR)/test_runner
 

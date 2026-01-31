@@ -21,7 +21,7 @@
   - [Scenario 1: Binary Semaphore (Mutex-like)](#scenario-1-binary-semaphore-mutex-like)
   - [Scenario 2: Counting Semaphore](#scenario-2-counting-semaphore)
   - [Scenario 3: Broadcast Semaphore](#scenario-3-broadcast-semaphore)
-- [API Reference](#api-reference)
+
 - [Appendix: Code Snippets](#appendix-code-snippets)
 
 ---
@@ -108,55 +108,23 @@ typedef struct wait_node {
 
 ### Wait Operation
 
-```mermaid
-sequenceDiagram
-    participant Task
-    participant Semaphore
-    participant WaitList
+**Logic Flow:**
 
-    Task->>Semaphore: so_sem_wait(s)
-    Semaphore->>Semaphore: spin_lock()
-    
-    alt Count > 0
-        Semaphore->>Semaphore: count--
-        Semaphore->>Semaphore: spin_unlock()
-        Semaphore-->>Task: Return (token acquired)
-    else Count == 0
-        Semaphore->>WaitList: Add to wait list
-        Semaphore->>Task: task_set_state(BLOCKED)
-        Semaphore->>Semaphore: spin_unlock()
-        Task->>Task: platform_yield()
-        Note over Task: Blocked, waiting...
-        Semaphore->>Task: Wake up (token available)
-    end
-```
+1.  **Acquire Lock:** `spin_lock(&s->lock)`
+2.  **Check Count:**
+    *   **If `count > 0`:**
+        *   Decrement count: `s->count--`
+        *   Release lock: `spin_unlock(&s->lock)`
+        *   **Return (Success)**
+    *   **If `count == 0`:**
+        *   Add current task to `wait_list`
+        *   Set task state to **BLOCKED**
+        *   Release lock: `spin_unlock(&s->lock)`
+        *   Yield CPU: `platform_yield()`
+        *   *... Task sleeps until signaled ...*
+        *   **Return (After Wakeup)**
 
-**Implementation:**
 
-```c
-void so_sem_wait(so_sem_t *s) {
-    task_t *current_task = task_get_current();
-    wait_node_t *node = task_get_wait_node(current_task);
-
-    while(1) {
-        uint32_t flags = spin_lock(&s->lock);
-
-        /* If resource available, take it */
-        if (s->count > 0) {
-            s->count--;
-            spin_unlock(&s->lock, flags);
-            return;
-        }
-
-        /* No resource available. Add to wait queue and block */
-        _add_to_wait_list(&s->wait_head, &s->wait_tail, node);
-        task_set_state(current_task, TASK_BLOCKED);
-
-        spin_unlock(&s->lock, flags);
-        platform_yield();
-    }
-}
-```
 
 **Key Points:**
 
@@ -166,48 +134,18 @@ void so_sem_wait(so_sem_t *s) {
 
 ### Signal Operation
 
-```mermaid
-sequenceDiagram
-    participant Task
-    participant Semaphore
-    participant WaitList
-    participant Waiter
+**Logic Flow:**
 
-    Task->>Semaphore: so_sem_signal(s)
-    Semaphore->>Semaphore: spin_lock()
-    
-    alt Waiters Exist
-        Semaphore->>WaitList: Pop first waiter
-        Semaphore->>Waiter: task_unblock()
-        Semaphore->>Semaphore: count++ (if < max_count)
-        Semaphore->>Semaphore: spin_unlock()
-        Waiter->>Waiter: Wake up (token acquired)
-    else No Waiters
-        Semaphore->>Semaphore: count++ (if < max_count)
-        Semaphore->>Semaphore: spin_unlock()
-    end
-```
+1.  **Acquire Lock:** `spin_lock(&s->lock)`
+2.  **Check Waiters:**
+    *   **If `wait_list` is not empty:**
+        *   Pop the first waiting task
+        *   Unblock the task: `task_unblock(task)`
+    *   **If `wait_list` is empty:**
+        *   Increment count: `s->count++` (only if `count < max_count`)
+3.  **Release Lock:** `spin_unlock(&s->lock)`
 
-**Implementation:**
 
-```c
-void so_sem_signal(so_sem_t *s) {
-    uint32_t flags = spin_lock(&s->lock);
-
-    /* If tasks are waiting, wake the first one */
-    void *task = _pop_from_wait_list(&s->wait_head, &s->wait_tail);
-    if (task) {
-        task_unblock((task_t*)task);
-    }
-    
-    /* Increment count, but cap at max */
-    if (s->count < s->max_count) {
-        s->count++;
-    }
-
-    spin_unlock(&s->lock, flags);
-}
-```
 
 **Key Points:**
 
@@ -217,54 +155,17 @@ void so_sem_signal(so_sem_t *s) {
 
 ### Broadcast Operation
 
-```mermaid
-sequenceDiagram
-    participant Task
-    participant Semaphore
-    participant WaitList
-    participant Waiter1
-    participant Waiter2
-    participant Waiter3
+**Logic Flow:**
 
-    Task->>Semaphore: so_sem_broadcast(s)
-    Semaphore->>Semaphore: spin_lock()
-    
-    loop For Each Waiter
-        Semaphore->>WaitList: Pop waiter
-        Semaphore->>Waiter1: task_unblock()
-        Semaphore->>Semaphore: count++ (if < max_count)
-    end
-    
-    Semaphore->>Semaphore: spin_unlock()
-    Waiter1->>Waiter1: Wake up
-    Waiter2->>Waiter2: Wake up
-    Waiter3->>Waiter3: Wake up
-```
+1.  **Acquire Lock:** `spin_lock(&s->lock)`
+2.  **Wake All:**
+    *   Loop for each task in `wait_list`:
+        *   Pop task
+        *   Unblock task: `task_unblock(task)`
+        *   Increment count: `s->count++` (only if `count < max_count`)
+3.  **Release Lock:** `spin_unlock(&s->lock)`
 
-**Implementation:**
 
-```c
-void so_sem_broadcast(so_sem_t *s) {
-    uint32_t flags = spin_lock(&s->lock);
-
-    /* Wake everyone in the queue */
-    while (1) {
-        void *task = _pop_from_wait_list(&s->wait_head, &s->wait_tail);
-        if (!task) {
-            break;
-        }
-        
-        task_unblock((task_t*)task);
-        
-        /* Increment count for each woken task, capped at max */
-        if (s->count < s->max_count) {
-            s->count++;
-        }
-    }
-
-    spin_unlock(&s->lock, flags);
-}
-```
 
 **Key Points:**
 
@@ -470,25 +371,7 @@ t=5: Tasks A, B, C compete
 
 ---
 
-## API Reference
 
-| Function | Description | Thread Safe? | Time Complexity |
-|:---------|:------------|:-------------|:----------------|
-| `so_sem_init` | Initialize semaphore | No (call at init) | $O(1)$ |
-| `so_sem_wait` | Wait for token | Yes | $O(1)$ |
-| `so_sem_signal` | Signal token available | Yes | $O(1)$ |
-| `so_sem_broadcast` | Signal all waiters | Yes | $O(N)$ |
-
-**Function Signatures:**
-
-```c
-void so_sem_init(so_sem_t *s, uint32_t initial_count, uint32_t max_count);
-void so_sem_wait(so_sem_t *s);
-void so_sem_signal(so_sem_t *s);
-void so_sem_broadcast(so_sem_t *s);
-```
-
----
 
 ## Appendix: Code Snippets
 

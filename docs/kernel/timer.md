@@ -22,7 +22,7 @@
   - [Scenario 1: One-Shot Timer](#scenario-1-one-shot-timer)
   - [Scenario 2: Periodic Timer](#scenario-2-periodic-timer)
   - [Scenario 3: Multiple Timers](#scenario-3-multiple-timers)
-- [API Reference](#api-reference)
+
 - [Appendix: Code Snippets](#appendix-code-snippets)
 
 ---
@@ -121,13 +121,7 @@ static sw_timer_t *timer_list_head = NULL;  /* Earliest timer first */
 *   **Insertion:** O(N) worst case, but typically O(1) if inserting at head
 *   **Expiry Check:** O(1) to check if head timer expired
 
-**Visual Representation:**
 
-```
-Timer List (sorted by expiry_tick):
-head → [Timer A: expiry=1000] → [Timer B: expiry=1500] → [Timer C: expiry=2000] → NULL
-         ↑ Earliest
-```
 
 ---
 
@@ -135,218 +129,50 @@ head → [Timer A: expiry=1000] → [Timer B: expiry=1500] → [Timer C: expiry=
 
 ### Timer Creation
 
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant TimerService
-    participant Mempool
+**Logic Flow:**
+1.  **Allocate:** Request storage from the timer memory pool.
+2.  **Initialize:** Set name, period, flags, callback, and argument.
+3.  **Return:** Handle to the new timer.
 
-    Caller->>TimerService: timer_create(name, period, auto_reload, callback, arg)
-    TimerService->>Mempool: mempool_alloc(timer_pool)
-    Mempool-->>TimerService: Timer structure
-    TimerService->>TimerService: Initialize fields<br/>(name, period, flags, callback, arg)
-    TimerService-->>Caller: Return timer handle
-```
 
-**Implementation:**
-
-```c
-sw_timer_t* timer_create(const char *name, 
-                        uint32_t period_ticks, 
-                        uint8_t auto_reload, 
-                        timer_callback_t callback, 
-                        void *arg) {
-    sw_timer_t *tmr = mempool_alloc(timer_pool);
-    if (!tmr) return NULL;
-    
-    tmr->name = name;
-    tmr->period_ticks = period_ticks;
-    tmr->flags = auto_reload ? TIMER_FLAG_AUTORELOAD : 0;
-    tmr->callback = callback;
-    tmr->arg = arg;
-    tmr->next = NULL;
-    
-    return tmr;
-}
-```
 
 ### Timer Start
 
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant TimerService
-    participant TimerList
-    participant DaemonTask
+**Logic Flow:**
+1.  **Lock:** Acquire spinlock.
+2.  **Check Active:** If timer is already in list, remove it.
+3.  **Set Expiry:** `timer->expiry_tick = current_tick + timer->period_ticks`.
+4.  **Mark Active:** Set `TIMER_FLAG_ACTIVE`.
+5.  **Insert:** Add to sorted list based on `expiry_tick`.
+6.  **Notify:** If inserted at the head (earliest expiry), wake the daemon task.
+7.  **Unlock:** Release spinlock.
 
-    Caller->>TimerService: timer_start(timer)
-    TimerService->>TimerService: spin_lock()
-    
-    alt Timer Already Active
-        TimerService->>TimerList: Remove from list
-    end
-    
-    TimerService->>TimerService: expiry_tick = now + period_ticks
-    TimerService->>TimerService: flags |= ACTIVE
-    TimerService->>TimerList: Insert into sorted list
-    
-    alt Inserted at Head
-        TimerService->>DaemonTask: task_notify() (wake daemon)
-    end
-    
-    TimerService->>TimerService: spin_unlock()
-    TimerService-->>Caller: Return
-```
 
-**Implementation:**
-
-```c
-int timer_start(sw_timer_t *timer) {
-    uint32_t flags = spin_lock(&timer_lock);
-    
-    /* If already active, remove from list first */
-    if (timer->flags & TIMER_FLAG_ACTIVE) {
-        timer_remove(timer);
-    }
-    
-    /* Calculate expiry time */
-    timer->expiry_tick = platform_get_ticks() + timer->period_ticks;
-    timer->flags |= TIMER_FLAG_ACTIVE;
-    
-    /* Check if this is the earliest timer */
-    uint8_t is_head = 0;
-    if (timer_list_head == NULL || 
-        (int32_t)(timer->expiry_tick - timer_list_head->expiry_tick) < 0) {
-        is_head = 1;
-    }
-    
-    timer_insert(timer);
-    
-    spin_unlock(&timer_lock, flags);
-    
-    /* If we inserted at head, wake daemon to reschedule */
-    if (is_head && timer_task_id != 0) {
-        task_notify(timer_task_id, 1);
-    }
-    
-    return 0;
-}
-```
-
-**Sorted Insertion:**
-
-```c
-static void timer_insert(sw_timer_t *tmr) {
-    sw_timer_t **curr = &timer_list_head;
-    
-    /* Find insertion point (sorted by expiry_tick) */
-    while (*curr != NULL) {
-        if ((int32_t)(tmr->expiry_tick - (*curr)->expiry_tick) < 0) {
-            break;  /* Insert before this timer */
-        }
-        curr = &(*curr)->next;
-    }
-    
-    tmr->next = *curr;
-    *curr = tmr;
-}
-```
 
 ### Timer Expiry Check
 
-```mermaid
-sequenceDiagram
-    participant DaemonTask
-    participant TimerService
-    participant TimerList
-    participant Callback
+**Logic Flow:**
+1.  **Lock:** Acquire spinlock.
+2.  **Check Head:** Inspect the first timer in the list.
+3.  **If Expired:**
+    *   Remove from list.
+    *   Clear `ACTIVE` flag.
+    *   **Auto-Reload:** If periodic, calculate next expiry and re-insert.
+    *   Unlock spinlock.
+    *   **Execute Callback:** Call user function.
+    *   Repeat loop (check new head).
+4.  **If Not Expired:**
+    *   Calculate time remaining until head expires.
+    *   Unlock spinlock.
+    *   **Sleep:** Daemon waits for that duration.
 
-    DaemonTask->>TimerService: timer_check_expiries()
-    TimerService->>TimerService: spin_lock()
-    TimerService->>TimerList: Check head timer
-    
-    alt Head Timer Expired
-        TimerService->>TimerList: Remove head timer
-        TimerService->>TimerService: flags &= ~ACTIVE
-        
-        alt Auto-Reload
-            TimerService->>TimerService: expiry_tick = now + period
-            TimerService->>TimerService: flags |= ACTIVE
-            TimerService->>TimerList: Re-insert timer
-        end
-        
-        TimerService->>TimerService: spin_unlock()
-        TimerService->>Callback: Execute callback(tmr->arg)
-        TimerService->>TimerService: Loop to check next timer
-    else Not Expired
-        TimerService->>TimerService: Calculate wait_time
-        TimerService->>TimerService: spin_unlock()
-        TimerService-->>DaemonTask: Return wait_time
-    end
-```
 
-**Implementation:**
-
-```c
-uint32_t timer_check_expiries(void) {
-    while (1) {
-        uint32_t now = platform_get_ticks();
-        
-        uint32_t flags = spin_lock(&timer_lock);
-        sw_timer_t *curr = timer_list_head;
-        
-        if (curr != NULL) {
-            /* Check if expired */
-            if ((int32_t)(now - curr->expiry_tick) >= 0) {
-                /* Timer expired */
-                sw_timer_t *tmr = curr;
-                
-                /* Remove from list */
-                timer_list_head = tmr->next;
-                tmr->next = NULL;
-                tmr->flags &= ~TIMER_FLAG_ACTIVE;
-                
-                /* If auto-reload, restart it */
-                if (tmr->flags & TIMER_FLAG_AUTORELOAD) {
-                    tmr->expiry_tick = now + tmr->period_ticks;
-                    tmr->flags |= TIMER_FLAG_ACTIVE;
-                    timer_insert(tmr);
-                }
-                
-                spin_unlock(&timer_lock, flags);
-                
-                /* Execute callback (outside critical section) */
-                if (tmr->callback) {
-                    tmr->callback(tmr->arg);
-                }
-                
-                /* Loop again to check next timer */
-                continue;
-            } else {
-                /* Not expired yet, calculate wait time */
-                uint32_t next_wake = curr->expiry_tick - now;
-                spin_unlock(&timer_lock, flags);
-                return next_wake;
-            }
-        }
-        
-        spin_unlock(&timer_lock, flags);
-        return UINT32_MAX;  /* No timers */
-    }
-}
-```
 
 ### Auto-Reload Timers
 
 Periodic timers automatically restart after expiring:
 
-```c
-if (tmr->flags & TIMER_FLAG_AUTORELOAD) {
-    tmr->expiry_tick = now + tmr->period_ticks;
-    tmr->flags |= TIMER_FLAG_ACTIVE;
-    timer_insert(tmr);  /* Re-insert into sorted list */
-}
-```
+
 
 **Behavior:**
 
@@ -534,37 +360,6 @@ t=1500: Timer B expires (one-shot, removed)
 
 t=1500: Timer C expires, restarts (expiry=2000)
     List: [A:2000] → [C:2000] → NULL
-```
-
----
-
-## API Reference
-
-| Function | Description | Thread Safe? | Time Complexity |
-|:---------|:------------|:-------------|:----------------|
-| `timer_service_init` | Initialize timer service | No (call at startup) | $O(1)$ |
-| `timer_create` | Create timer | Yes | $O(1)$ |
-| `timer_start` | Start timer | Yes | $O(N)$ |
-| `timer_stop` | Stop timer | Yes | $O(N)$ |
-| `timer_delete` | Delete timer | Yes | $O(N)$ |
-| `timer_check_expiries` | Check for expired timers | Yes | $O(K)$ |
-| `timer_get_name` | Get timer name | Yes | $O(1)$ |
-| `timer_get_period` | Get timer period | Yes | $O(1)$ |
-| `timer_is_active` | Check if active | Yes | $O(1)$ |
-
-**Function Signatures:**
-
-```c
-void timer_service_init(uint32_t max_timers);
-sw_timer_t* timer_create(const char *name, uint32_t period_ticks, 
-                        uint8_t auto_reload, timer_callback_t callback, void *arg);
-int timer_start(sw_timer_t *timer);
-int timer_stop(sw_timer_t *timer);
-void timer_delete(sw_timer_t *timer);
-uint32_t timer_check_expiries(void);
-const char* timer_get_name(sw_timer_t *timer);
-uint32_t timer_get_period(sw_timer_t *timer);
-uint8_t timer_is_active(sw_timer_t *timer);
 ```
 
 ---

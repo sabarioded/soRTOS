@@ -18,9 +18,9 @@
   - [Space Complexity](#space-complexity)
 - [Example Scenarios](#example-scenarios)
   - [Scenario 1: Basic Mutex Usage](#scenario-1-basic-mutex-usage)
-  - [Scenario 2: Priority Inheritance](#scenario-2-priority-inheritance)
+  - [Scenario 2: Priority Inversion](#scenario-2-priority-inversion)
   - [Scenario 3: Recursive Locking](#scenario-3-recursive-locking)
-- [API Reference](#api-reference)
+
 - [Appendix: Code Snippets](#appendix-code-snippets)
 
 ---
@@ -110,158 +110,31 @@ typedef struct wait_node {
 
 ### Lock Acquisition
 
-```mermaid
-sequenceDiagram
-    participant Task
-    participant Mutex
-    participant Owner
-    participant Scheduler
-
-    Task->>Mutex: so_mutex_lock(m)
-    Mutex->>Mutex: spin_lock()
-    
-    alt Already Owned by This Task
-        Mutex->>Mutex: Recursive lock (return)
-    else Unlocked
-        Mutex->>Mutex: owner = current_task
-        Mutex->>Mutex: spin_unlock()
-        Mutex-->>Task: Return (lock acquired)
-    else Locked by Another Task
-        Mutex->>Owner: Check owner weight
-        alt Current Task Has Higher Priority
-            Mutex->>Owner: task_boost_weight(owner, current_weight)
-        end
-        Mutex->>Mutex: Add to wait list
-        Mutex->>Task: task_set_state(BLOCKED)
-        Mutex->>Mutex: spin_unlock()
-        Task->>Scheduler: platform_yield()
-        Note over Task: Blocked, waiting...
-        Scheduler->>Task: Wake up (lock acquired)
-    end
-```
-
-**Implementation:**
-
-```c
-void so_mutex_lock(so_mutex_t *m) {
-    task_t *current_task = task_get_current();
-    wait_node_t *node = task_get_wait_node(current_task);
-
-    while(1) {
-        uint32_t flags = spin_lock(&m->lock);
-        
-        /* Check if we already own it (recursive) */
-        if (m->owner == current_task) {
-            spin_unlock(&m->lock, flags);
-            return;
-        }
-        
-        /* If unlocked, take ownership */
-        if (m->owner == NULL) {
-            m->owner = current_task;
-            spin_unlock(&m->lock, flags);
-            return;
-        }
-
-        /* Boost owner if we have higher priority */
-        task_t *owner = (task_t*)m->owner;
-        uint8_t curr_w = task_get_weight(current_task);
-        if (curr_w > task_get_weight(owner)) {
-            task_boost_weight(owner, curr_w);
-        }
-
-        /* Add to wait queue and block */
-        _add_to_wait_list(&m->wait_head, &m->wait_tail, node);
-        task_set_state(current_task, TASK_BLOCKED);
-
-        spin_unlock(&m->lock, flags);
-        platform_yield();
-    }
-}
-```
-
-**Key Points:**
-
-*   **Recursive Locking:** Same task can lock multiple times (no deadlock)
-*   **Priority Inheritance:** Owner's weight is boosted to highest waiter's weight
-*   **Blocking:** Task blocks and yields CPU if lock is held
+**Logic Flow:**
+1.  **Lock:** Acquire mutex spinlock.
+2.  **Check Ownership:**
+    *   **Recursive:** If `owner == current_task`, return immediately.
+    *   **Unlocked:** If `owner == NULL`, set `owner = current_task` and return.
+3.  **Contention:** If locked by another task:
+    *   **Priority Inheritance:** If `current_weight > owner_weight`, boost owner's weight.
+    *   **Block:** Add current task to `wait_list`, set state to `BLOCKED`.
+    *   **Unlock & Yield:** Release spinlock and yield CPU.
+    *   **Retry:** On wake-up, retry acquisition.
 
 ### Lock Release
 
-```mermaid
-sequenceDiagram
-    participant Task
-    participant Mutex
-    participant NextWaiter
-    participant Scheduler
-
-    Task->>Mutex: so_mutex_unlock(m)
-    Mutex->>Mutex: spin_lock()
-    Mutex->>Mutex: Validate owner == current_task
-    
-    Mutex->>Task: task_restore_base_weight()
-    
-    alt Waiters Exist
-        Mutex->>Mutex: Pop next waiter from list
-        Mutex->>Mutex: owner = next_waiter
-        Mutex->>NextWaiter: Check remaining waiters
-        alt Higher Priority Waiter Remains
-            Mutex->>NextWaiter: task_boost_weight(max_waiter)
-        end
-        Mutex->>NextWaiter: task_unblock()
-        Mutex->>Mutex: spin_unlock()
-        Scheduler->>NextWaiter: Wake up (lock acquired)
-    else No Waiters
-        Mutex->>Mutex: owner = NULL
-        Mutex->>Mutex: spin_unlock()
-    end
-```
-
-**Implementation:**
-
-```c
-void so_mutex_unlock(so_mutex_t *m) {
-    uint32_t flags = spin_lock(&m->lock);
-
-    /* Only the owner can unlock */
-    task_t *current = task_get_current();
-    if(m->owner != current) {
-        spin_unlock(&m->lock, flags);
-        return;
-    }
-
-    /* Restore original priority */
-    task_restore_base_weight(current);
-
-    /* If tasks are waiting, perform direct handoff */
-    void *next_task = _pop_from_wait_list(&m->wait_head, &m->wait_tail);
-    if (next_task) {
-        task_t *next = (task_t*)next_task;
-        
-        /* Pass ownership directly */
-        m->owner = next;
-        
-        /* Check if new owner needs priority boost from remaining waiters */
-        uint8_t max_waiter = _get_max_waiter_weight(m->wait_head);
-        if (max_waiter > task_get_weight(next)) {
-            task_boost_weight(next, max_waiter);
-        }
-        
-        task_unblock(next);
-    } else {
-        /* No one waiting, clear ownership */
-        m->owner = NULL;
-    }
-
-    spin_unlock(&m->lock, flags);
-}
-```
-
-**Key Points:**
-
-*   **Direct Handoff:** Lock ownership transferred directly to next waiter (no unlock/lock cycle)
-*   **Priority Restoration:** Owner's weight is restored to base weight
-*   **Cascading Boost:** New owner may need priority boost from remaining waiters
+**Logic Flow:**
+1.  **Lock:** Acquire mutex spinlock.
+2.  **Validate:** Ensure `owner == current_task`.
+3.  **Restore Priority:** Restore owner's base weight (undo inheritance).
+4.  **Handoff:**
+    *   **Waiters Exist:**
+        *   Pop next waiter from list.
+        *   **Direct Handoff:** Set `owner = next_waiter` immediately.
+        *   **Cascade Boost:** If remaining waiters have higher priority than new owner, boost new owner.
+        *   **Wake:** Unblock the new owner.
+    *   **No Waiters:** Set `owner = NULL`.
+5.  **Unlock:** Release spinlock.
 
 ### Priority Inheritance
 
@@ -269,25 +142,11 @@ Priority inheritance prevents **priority inversion**, where a high-priority task
 
 **Algorithm:**
 
-1. When a high-priority task blocks on a mutex held by a low-priority task:
-   ```c
-   if (curr_w > task_get_weight(owner)) {
-       task_boost_weight(owner, curr_w);
-   }
-   ```
+**Logic Flow:**
 
-2. When the lock is released, the owner's weight is restored:
-   ```c
-   task_restore_base_weight(current);
-   ```
-
-3. The new owner may need a boost if higher-priority tasks are still waiting:
-   ```c
-   uint8_t max_waiter = _get_max_waiter_weight(m->wait_head);
-   if (max_waiter > task_get_weight(next)) {
-       task_boost_weight(next, max_waiter);
-   }
-   ```
+1.  **Inherit:** When High Task blocks on Low Task's mutex, boost Low Task's weight to match High Task.
+2.  **Restore:** When Low Task releases data, restore its original weight.
+3.  **Cascade:** If other high-priority tasks are still waiting, boost the *new* owner immediately.
 
 **Visual Example:**
 
@@ -465,23 +324,7 @@ void main_task(void *arg) {
 
 ---
 
-## API Reference
 
-| Function | Description | Thread Safe? | Time Complexity |
-|:---------|:------------|:-------------|:----------------|
-| `so_mutex_init` | Initialize mutex | No (call at init) | $O(1)$ |
-| `so_mutex_lock` | Acquire lock | Yes | $O(1)$ |
-| `so_mutex_unlock` | Release lock | Yes | $O(1)$ or $O(N)$ |
-
-**Function Signatures:**
-
-```c
-void so_mutex_init(so_mutex_t *m);
-void so_mutex_lock(so_mutex_t *m);
-void so_mutex_unlock(so_mutex_t *m);
-```
-
----
 
 ## Appendix: Code Snippets
 
