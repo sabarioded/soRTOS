@@ -2,6 +2,7 @@
 #define SPI_HAL_NATIVE_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /* Minimal SPI register model for native simulation */
 typedef struct {
@@ -24,5 +25,6 @@ void spi_hal_init(void *hal_handle, void *config_ptr);
 uint8_t spi_hal_transfer_byte(void *hal_handle, uint8_t byte);
 void spi_hal_enable_rx_irq(void *hal_handle, uint8_t enable);
 void spi_hal_enable_tx_irq(void *hal_handle, uint8_t enable);
+int spi_hal_transfer_dma(void *hal_handle, const uint8_t *tx_data, uint8_t *rx_data, size_t len, void (*done_cb)(void *), void *cb_arg);
 
 #endif /* SPI_HAL_NATIVE_H */

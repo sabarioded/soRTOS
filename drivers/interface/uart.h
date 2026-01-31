@@ -11,6 +11,12 @@
 typedef struct uart_context* uart_port_t;
 
 /**
+ * @brief UART callback function type for async operations.
+ * @param arg User-provided argument.
+ */
+typedef void (*uart_callback_t)(void *arg);
+
+/**
  * @brief Sets up the UART hardware with the specific settings provided.
  * This prepares the port for sending and receiving data.
  * Allocates memory for the UART context.
@@ -116,6 +122,28 @@ void uart_set_rx_queue(uart_port_t port, queue_t *q);
  * @param q Pointer to the queue (NULL to disable).
  */
 void uart_set_tx_queue(uart_port_t port, queue_t *q);
+
+/**
+ * @brief Start a DMA-based TX transfer.
+ * @param port Handle to the UART port.
+ * @param buf Data to transmit.
+ * @param len Number of bytes.
+ * @param callback Function to call when DMA transfer completes.
+ * @param arg User argument.
+ * @return 0 on success, -1 on error.
+ */
+int uart_write_dma(uart_port_t port, const uint8_t *buf, size_t len, uart_callback_t callback, void *arg);
+
+/**
+ * @brief Start a DMA-based RX transfer.
+ * @param port Handle to the UART port.
+ * @param buf Buffer to store received data.
+ * @param len Number of bytes.
+ * @param callback Function to call when DMA transfer completes.
+ * @param arg User argument.
+ * @return 0 on success, -1 on error.
+ */
+int uart_read_dma(uart_port_t port, uint8_t *buf, size_t len, uart_callback_t callback, void *arg);
 
 /**
  * @brief Called by the HAL when a byte is received.

@@ -76,6 +76,21 @@ int spi_transfer_async(spi_port_t port, const uint8_t *tx_data,
                        void *arg);
 
 /**
+ * @brief Transmit and Receive data using DMA.
+ *
+ * @param port Handle to the SPI port.
+ * @param tx_data Pointer to the data to transmit.
+ * @param rx_data Pointer to the buffer to receive data.
+ * @param len Number of bytes to transfer.
+ * @param callback Function to call when transfer completes.
+ * @param arg User argument.
+ * @return int 0 on success, -1 on error.
+ */
+int spi_transfer_dma(spi_port_t port, const uint8_t *tx_data,
+                     uint8_t *rx_data, size_t len, spi_callback_t callback,
+                     void *arg);
+
+/**
  * @brief Get the size of the SPI context structure.
  * @return size_t Size in bytes.
  */

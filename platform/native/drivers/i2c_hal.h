@@ -55,5 +55,7 @@ int i2c_hal_master_transmit(void *hal_handle, uint16_t addr, const uint8_t *data
 int i2c_hal_master_receive(void *hal_handle, uint16_t addr, uint8_t *data, size_t len);
 void i2c_hal_enable_ev_irq(void *hal_handle, uint8_t enable);
 void i2c_hal_enable_er_irq(void *hal_handle, uint8_t enable);
+int i2c_hal_master_transmit_dma(void *hal_handle, uint16_t addr, const uint8_t *data, size_t len, void (*done_cb)(void *), void *cb_arg);
+int i2c_hal_master_receive_dma(void *hal_handle, uint16_t addr, uint8_t *data, size_t len, void (*done_cb)(void *), void *cb_arg);
 
 #endif /* I2C_HAL_NATIVE_H */

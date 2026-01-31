@@ -106,4 +106,4 @@ void platform_uart_set_rx_queue(queue_t *q);
  */
 void platform_uart_set_tx_queue(queue_t *q);
 
-#endif // PLATFORM_H
+#endif /* PLATFORM_H */

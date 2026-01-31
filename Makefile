@@ -52,7 +52,7 @@ ifeq ($(PLATFORM), stm32l476rg)
 		$(PLATFORM_DIR)/stm32l476rg/system_clock.c \
 		$(PLATFORM_DIR)/stm32l476rg/stm32l476_startup.c \
 		$(ARCH_DIR)/arm/cortex_m4/arch_ops.c \
-		$(DRIVERS_DIR)/stm32/gpio.c \
+		$(DRIVERS_DIR)/src/gpio.c \
 		$(DRIVERS_DIR)/src/uart.c \
 		$(DRIVERS_DIR)/src/led.c \
 		$(DRIVERS_DIR)/src/button.c \
@@ -80,7 +80,7 @@ ifeq ($(PLATFORM), stm32l476rg)
 
 	# Linker
 	LDSCRIPT = $(PLATFORM_DIR)/stm32l476rg/stm32l476rg_flash.ld
-	LDFLAGS  = -nostdlib -T $(LDSCRIPT) -Wl,-Map=$(BUILD_DIR)/$(TARGET).map -Wl,--gc-sections
+	LDFLAGS  = -nostdlib -T $(LDSCRIPT) -Wl,-Map=$(BUILD_DIR)/$(TARGET).map -Wl,--gc-sections -lgcc
 	
 	# Compiler Flags
 	CFLAGS = $(MCU_FLAGS) -std=gnu11 -g -O0 -Wall -Wextra -ffreestanding \
@@ -98,7 +98,22 @@ ifeq ($(PLATFORM), native)
 	# Native platform implementation
 	C_SRCS += $(PLATFORM_DIR)/native/platform.c \
 	          $(PLATFORM_DIR)/native/memory_map.c \
-	          $(PLATFORM_DIR)/native/drivers/native_hal.c
+	          $(PLATFORM_DIR)/native/drivers/native_hal.c \
+	          $(ARCH_DIR)/native/arch_ops.c \
+	          $(DRIVERS_DIR)/src/systick.c \
+	          $(DRIVERS_DIR)/src/button.c \
+	          $(DRIVERS_DIR)/src/led.c \
+	          $(DRIVERS_DIR)/src/uart.c \
+	          $(DRIVERS_DIR)/src/i2c.c \
+	          $(DRIVERS_DIR)/src/spi.c \
+	          $(DRIVERS_DIR)/src/dma.c \
+	          $(DRIVERS_DIR)/src/adc.c \
+	          $(DRIVERS_DIR)/src/exti.c \
+	          $(DRIVERS_DIR)/src/watchdog.c \
+	          $(DRIVERS_DIR)/src/flash.c \
+	          $(DRIVERS_DIR)/src/dac.c \
+	          $(DRIVERS_DIR)/src/pwm.c \
+	          $(DRIVERS_DIR)/src/rtc.c
 	
 	LDFLAGS = 
 endif

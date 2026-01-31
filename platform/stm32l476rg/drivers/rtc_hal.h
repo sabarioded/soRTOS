@@ -97,7 +97,7 @@ static inline void rtc_hal_set_time(const rtc_time_t *time) {
 static inline void rtc_hal_get_time(rtc_time_t *time) {
     /* Wait for RSF (Registers Synchronized Flag) */
     /* Note: In high perf code, don't busy wait here indefinitely */
-    // while (!(RTC->ISR & RTC_ISR_RSF));
+/* while (!(RTC->ISR & RTC_ISR_RSF)); */
 
     uint32_t tr = RTC->TR;
     time->hours = rtc_bcd2bin((tr >> 16) & 0x3F);

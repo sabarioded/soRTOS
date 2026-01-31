@@ -61,6 +61,32 @@ void test_uart_write_buffer_should_CopyAndEnableTx(void) {
     TEST_ASSERT_EQUAL(1, mock_uart_enable_tx_irq_arg);
 }
 
+static void uart_dma_done(void *arg) {
+    int *counter = (int *)arg;
+    (*counter)++;
+}
+
+void test_uart_dma_should_InvokeCallback(void) {
+    void *hal_handle = (void*)0x1000;
+    void *config = (void*)0x2000;
+    uint8_t rx_buf[8];
+    uint8_t tx_buf[8];
+    size_t ctx_size = uart_get_context_size();
+    uint8_t ctx_mem[ctx_size];
+    int tx_done = 0;
+    int rx_done = 0;
+    const uint8_t data[] = {0xAA, 0xBB, 0xCC};
+
+    uart_port_t port = uart_init(ctx_mem, hal_handle, rx_buf, sizeof(rx_buf), tx_buf, sizeof(tx_buf), config, 80000000);
+    TEST_ASSERT_NOT_NULL(port);
+
+    TEST_ASSERT_EQUAL(0, uart_write_dma(port, data, sizeof(data), uart_dma_done, &tx_done));
+    TEST_ASSERT_EQUAL(1, tx_done);
+
+    TEST_ASSERT_EQUAL(0, uart_read_dma(port, rx_buf, sizeof(rx_buf), uart_dma_done, &rx_done));
+    TEST_ASSERT_EQUAL(1, rx_done);
+}
+
 void run_uart_tests(void) {
     printf("\n=== Starting UART Tests ===\n");
 
@@ -69,6 +95,7 @@ void run_uart_tests(void) {
     UnitySetTestFile("tests/test_uart.c");
     RUN_TEST(test_uart_create_should_AllocateAndInit);
     RUN_TEST(test_uart_write_buffer_should_CopyAndEnableTx);
+    RUN_TEST(test_uart_dma_should_InvokeCallback);
 
     printf("=== UART Tests Complete ===\n");
 }

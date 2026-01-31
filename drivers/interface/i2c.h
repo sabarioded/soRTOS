@@ -101,6 +101,35 @@ int i2c_master_receive_async(i2c_port_t port, uint16_t addr, uint8_t *data,
                              size_t len, i2c_callback_t callback, void *arg);
 
 /**
+ * @brief Transmit data via DMA in Master mode.
+ *
+ * @param port Handle to the I2C port.
+ * @param addr 7-bit Slave Address.
+ * @param data Pointer to the data buffer.
+ * @param len Number of bytes to transmit.
+ * @param callback Function to call when transfer completes.
+ * @param arg User argument.
+ * @return int 0 on success, -1 on error.
+ */
+int i2c_master_transmit_dma(i2c_port_t port, uint16_t addr,
+                            const uint8_t *data, size_t len,
+                            i2c_callback_t callback, void *arg);
+
+/**
+ * @brief Receive data via DMA in Master mode.
+ *
+ * @param port Handle to the I2C port.
+ * @param addr 7-bit Slave Address.
+ * @param data Pointer to the buffer to store received data.
+ * @param len Number of bytes to receive.
+ * @param callback Function to call when transfer completes.
+ * @param arg User argument.
+ * @return int 0 on success, -1 on error.
+ */
+int i2c_master_receive_dma(i2c_port_t port, uint16_t addr, uint8_t *data,
+                           size_t len, i2c_callback_t callback, void *arg);
+
+/**
  * @brief Get the size of the I2C context structure.
  * @return size_t Size in bytes.
  */

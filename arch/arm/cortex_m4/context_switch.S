@@ -2,9 +2,8 @@
 .cpu cortex-m4
 .thumb
 
-.extern task_current             
-.extern task_next                
 .extern schedule_next_task      
+.extern task_get_current
 
 .global task_create_first
 .global PendSV_Handler
@@ -51,9 +50,8 @@ task_create_first:
 
     STR r1, [r0]                            /* write back updated SHPR3 */
 
-    /* set PSP = task_current->psp so thread mode tasks will use it */
-    LDR r0, =task_current       /* r0 = &task_current */
-    LDR r0, [r0]                /* r0 = task_current */
+    /* set PSP = task_get_current()->psp so thread mode tasks will use it */
+    BL  task_get_current        /* r0 = task_current */
     LDR r0, [r0]                /* r0 = task_current->psp */
     ADD r0, r0, #4              /* Skip LR (EXC_RETURN) on stack */
     LDMIA r0!, {r4-r11}         /* restore R4-R11 from task stack */
@@ -89,9 +87,11 @@ PendSV_Handler:
     STMDB r0!, {r4-r11}         /* save R4-R11 on task stack */
     STMDB r0!, {lr}             /* save EXC_RETURN on task stack */
 
-    LDR r1, =task_current       /* r1 = &task_current */
-    LDR r1, [r1]                /* r1 = task_current */
-    STR r0, [r1]                /* task_current->psp = r0 */
+    /* Save PSP into current task */
+    MOV r4, r0                  /* r4 = updated PSP */
+    BL  task_get_current        /* r0 = task_current */
+    MOV r1, r0
+    STR r4, [r1]                /* task_current->psp = r4 */
 
     /* call the scheduler to select the next task */
     PUSH {lr}                   /* save handler’s LR (EXC_RETURN) */
@@ -99,9 +99,8 @@ PendSV_Handler:
     POP  {lr}                   /* restore EXC_RETURN so BX lr works later */
 
     /* restore the context of the next task */
-    LDR r1, =task_next          /* r1 = &task_next */
-    LDR r1, [r1]                /* r1 = task_next */
-    LDR r0, [r1]                /* r0 = task_next->psp */
+    BL  task_get_current        /* r0 = task_current (next) */
+    LDR r0, [r0]                /* r0 = task_current->psp */
     
     LDMIA r0!, {lr}             /* restore EXC_RETURN */
     LDMIA r0!, {r4-r11}         /* restore R4-R11 from task stack */
@@ -112,11 +111,5 @@ PendSV_Handler:
     VLDMIAEQ r0!, {s16-s31}     /* Restore FPU Callee-Saved Registers */
 
     MSR PSP, r0                 /* PSP = r0 */
-
-    /* update task_current = task_next */
-    LDR r2, =task_next          /* r2 = &task_next */
-    LDR r2, [r2]                /* r2 = task_next */
-    LDR r1, =task_current       /* r1 = &task_current */
-    STR r2, [r1]                /* task_current = task_next */
 
     BX lr                       /* exception return to the next task */

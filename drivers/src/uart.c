@@ -24,6 +24,16 @@ struct uart_context {
     volatile uint16_t rx_overflow;      /* Count of RX buffer overflows */
     volatile uint16_t rx_errors;        /* Count of RX hardware errors */
     uint16_t        rx_notify_task_id;  /* Task ID to notify on RX */
+    const uint8_t   *tx_dma_buf;        /* DMA TX buffer */
+    uint8_t         *rx_dma_buf;        /* DMA RX buffer */
+    size_t          tx_dma_len;         /* DMA TX length */
+    size_t          rx_dma_len;         /* DMA RX length */
+    uart_callback_t tx_dma_cb;          /* DMA TX completion callback */
+    void            *tx_dma_arg;        /* DMA TX callback arg */
+    uart_callback_t rx_dma_cb;          /* DMA RX completion callback */
+    void            *rx_dma_arg;        /* DMA RX callback arg */
+    uint8_t         tx_dma_active;      /* DMA TX in progress */
+    uint8_t         rx_dma_active;      /* DMA RX in progress */
 };
 
 /* Get the size of the UART context structure */
@@ -205,6 +215,68 @@ void uart_set_tx_queue(uart_port_t port, queue_t *q) {
             queue_set_push_callback(q, uart_tx_queue_callback, port);
         }
     }
+}
+
+static void uart_dma_tx_done(void *arg) {
+    uart_port_t port = (uart_port_t)arg;
+    if (!port) {
+        return;
+    }
+    port->tx_dma_active = 0;
+    if (port->tx_dma_cb) {
+        port->tx_dma_cb(port->tx_dma_arg);
+    }
+}
+
+static void uart_dma_rx_done(void *arg) {
+    uart_port_t port = (uart_port_t)arg;
+    if (!port) {
+        return;
+    }
+    port->rx_dma_active = 0;
+    if (port->rx_dma_cb) {
+        port->rx_dma_cb(port->rx_dma_arg);
+    }
+}
+
+int uart_write_dma(uart_port_t port, const uint8_t *buf, size_t len, uart_callback_t callback, void *arg) {
+    if (!port || !port->hal_handle || !buf || (len == 0U)) {
+        return -1;
+    }
+    if (port->tx_dma_active) {
+        return -1;
+    }
+    port->tx_dma_buf = buf;
+    port->tx_dma_len = len;
+    port->tx_dma_cb = callback;
+    port->tx_dma_arg = arg;
+    port->tx_dma_active = 1;
+
+    if (uart_hal_start_tx_dma(port->hal_handle, buf, len, uart_dma_tx_done, port) != 0) {
+        port->tx_dma_active = 0;
+        return -1;
+    }
+    return 0;
+}
+
+int uart_read_dma(uart_port_t port, uint8_t *buf, size_t len, uart_callback_t callback, void *arg) {
+    if (!port || !port->hal_handle || !buf || (len == 0U)) {
+        return -1;
+    }
+    if (port->rx_dma_active) {
+        return -1;
+    }
+    port->rx_dma_buf = buf;
+    port->rx_dma_len = len;
+    port->rx_dma_cb = callback;
+    port->rx_dma_arg = arg;
+    port->rx_dma_active = 1;
+
+    if (uart_hal_start_rx_dma(port->hal_handle, buf, len, uart_dma_rx_done, port) != 0) {
+        port->rx_dma_active = 0;
+        return -1;
+    }
+    return 0;
 }
 
 /* Called by the HAL when a byte is received */

@@ -450,8 +450,9 @@ static int cmd_heap_test_handler(int argc, char **argv) {
     /* Stress test: Random allocations and frees */
     else if (utils_strcmp(mode, "stress") == 0) {
         #define STRESS_MAX_PTRS 32
-        void *ptrs[STRESS_MAX_PTRS] = {0};
+        void *ptrs[STRESS_MAX_PTRS];
         int alloc_count = 0;
+        utils_memset(ptrs, 0, sizeof(ptrs));
         
         cli_printf("Starting stress test (Loop 100 times)...\r\n");
         

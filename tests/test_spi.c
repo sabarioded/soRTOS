@@ -17,6 +17,11 @@ static void setUp_local(void) {
 static void tearDown_local(void) {
 }
 
+static void spi_dma_done(void *arg) {
+    int *counter = (int *)arg;
+    (*counter)++;
+}
+
 void test_spi_create_should_AllocateAndInit(void) {
     void* hal_handle = (void*)0xDEADBEEF;
     void* config = (void*)0xCAFEBABE;
@@ -44,6 +49,20 @@ void test_spi_transfer_should_TransferBytes(void) {
     TEST_ASSERT_EQUAL_HEX8(0x11, rx_data[1]);
 }
 
+void test_spi_dma_should_InvokeCallback(void) {
+    void *hal_handle = (void*)0x1234;
+    void *config = (void*)0xCAFEBABE;
+    size_t ctx_size = spi_get_context_size();
+    uint8_t ctx_mem[ctx_size];
+    spi_port_t port = spi_init(ctx_mem, hal_handle, config);
+    uint8_t tx_data[] = {0x10, 0x20};
+    uint8_t rx_data[2];
+    int done = 0;
+
+    TEST_ASSERT_EQUAL(0, spi_transfer_dma(port, tx_data, rx_data, sizeof(tx_data), spi_dma_done, &done));
+    TEST_ASSERT_EQUAL(1, done);
+}
+
 void run_spi_tests(void) {
     printf("\n=== Starting SPI Tests ===\n");
 
@@ -52,6 +71,7 @@ void run_spi_tests(void) {
     UnitySetTestFile("tests/test_spi.c");
     RUN_TEST(test_spi_create_should_AllocateAndInit);
     RUN_TEST(test_spi_transfer_should_TransferBytes);
+    RUN_TEST(test_spi_dma_should_InvokeCallback);
 
     printf("=== SPI Tests Complete ===\n");
 }

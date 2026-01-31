@@ -209,7 +209,7 @@ static void flash_set_latency(sysclock_hz_t sysclk_hz, system_vos_t power)  {
                 latency = 2;
             } else if(sysclk_hz <= 64000000UL) {
                 latency = 3;
-            } else { // max sysclk in VOS1 is 80MHz
+            } else { /* max sysclk in VOS1 is 80MHz */
                 latency = 4;
             }
             break;
@@ -220,7 +220,7 @@ static void flash_set_latency(sysclock_hz_t sysclk_hz, system_vos_t power)  {
                 latency = 1;
             } else if(sysclk_hz <= 18000000UL) {
                 latency = 2;
-            } else { // max sysclk in VOS2 is 26MHz
+            } else { /* max sysclk in VOS2 is 26MHz */
                 latency = 3;
             }
             break;

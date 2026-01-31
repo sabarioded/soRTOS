@@ -27,4 +27,4 @@ void* memory_map_get_heap_start(void);
  */
 size_t memory_map_get_heap_size(void);
 
-#endif // MEMORY_MAP_H
+#endif /* MEMORY_MAP_H */

@@ -113,6 +113,33 @@ void uart_hal_write_byte(void *hal_handle, uint8_t byte) {
     fflush(stdout);
 }
 
+int uart_hal_start_tx_dma(void *hal_handle, const uint8_t *buf, size_t len, void (*done_cb)(void *), void *cb_arg) {
+    (void)hal_handle;
+    if (!buf || len == 0) {
+        return -1;
+    }
+    for (size_t i = 0; i < len; i++) {
+        putchar((int)buf[i]);
+    }
+    fflush(stdout);
+    if (done_cb) {
+        done_cb(cb_arg);
+    }
+    return 0;
+}
+
+int uart_hal_start_rx_dma(void *hal_handle, uint8_t *buf, size_t len, void (*done_cb)(void *), void *cb_arg) {
+    (void)hal_handle;
+    if (!buf || len == 0) {
+        return -1;
+    }
+    memset(buf, 0, len);
+    if (done_cb) {
+        done_cb(cb_arg);
+    }
+    return 0;
+}
+
 /* --- Systick --- */
 static uint32_t systick_reload;
 
@@ -174,6 +201,28 @@ void i2c_hal_enable_er_irq(void *hal_handle, uint8_t enable) {
     (void)enable;
 }
 
+int i2c_hal_master_transmit_dma(void *hal_handle, uint16_t addr, const uint8_t *data, size_t len, void (*done_cb)(void *), void *cb_arg) {
+    (void)addr;
+    if (i2c_hal_master_transmit(hal_handle, addr, data, len) != 0) {
+        return -1;
+    }
+    if (done_cb) {
+        done_cb(cb_arg);
+    }
+    return 0;
+}
+
+int i2c_hal_master_receive_dma(void *hal_handle, uint16_t addr, uint8_t *data, size_t len, void (*done_cb)(void *), void *cb_arg) {
+    (void)addr;
+    if (i2c_hal_master_receive(hal_handle, addr, data, len) != 0) {
+        return -1;
+    }
+    if (done_cb) {
+        done_cb(cb_arg);
+    }
+    return 0;
+}
+
 /* --- SPI --- */
 void spi_hal_init(void *hal_handle, void *config_ptr) {
     SPI_TypeDef *SPIx = (SPI_TypeDef *)hal_handle;
@@ -202,6 +251,22 @@ void spi_hal_enable_rx_irq(void *hal_handle, uint8_t enable) {
 void spi_hal_enable_tx_irq(void *hal_handle, uint8_t enable) {
     (void)hal_handle;
     (void)enable;
+}
+
+int spi_hal_transfer_dma(void *hal_handle, const uint8_t *tx_data, uint8_t *rx_data, size_t len, void (*done_cb)(void *), void *cb_arg) {
+    (void)hal_handle;
+    if (len == 0) {
+        return -1;
+    }
+    if (rx_data) {
+        for (size_t i = 0; i < len; i++) {
+            rx_data[i] = tx_data ? tx_data[i] : 0xFF;
+        }
+    }
+    if (done_cb) {
+        done_cb(cb_arg);
+    }
+    return 0;
 }
 
 /* --- ADC --- */

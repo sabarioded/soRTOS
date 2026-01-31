@@ -184,4 +184,20 @@ static inline void spi_hal_enable_tx_irq(void *hal_handle, uint8_t enable) {
   }
 }
 
+/**
+ * @brief Start a DMA-based SPI transfer.
+ * @return 0 on success, -1 on error.
+ */
+static inline int spi_hal_transfer_dma(void *hal_handle, const uint8_t *tx_data,
+                                       uint8_t *rx_data, size_t len,
+                                       void (*done_cb)(void *), void *cb_arg) {
+  (void)hal_handle;
+  (void)tx_data;
+  (void)rx_data;
+  (void)len;
+  (void)done_cb;
+  (void)cb_arg;
+  return -1;
+}
+
 #endif /* SPI_HAL_STM32_H */

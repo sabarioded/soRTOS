@@ -201,6 +201,34 @@ static inline void uart_hal_write_byte(void *hal_handle, uint8_t byte) {
 }
 
 /**
+ * @brief Start a DMA-based UART TX transfer.
+ * @return 0 on success, -1 on error.
+ */
+static inline int uart_hal_start_tx_dma(void *hal_handle, const uint8_t *buf, size_t len,
+                                        void (*done_cb)(void *), void *cb_arg) {
+    (void)hal_handle;
+    (void)buf;
+    (void)len;
+    (void)done_cb;
+    (void)cb_arg;
+    return -1;
+}
+
+/**
+ * @brief Start a DMA-based UART RX transfer.
+ * @return 0 on success, -1 on error.
+ */
+static inline int uart_hal_start_rx_dma(void *hal_handle, uint8_t *buf, size_t len,
+                                        void (*done_cb)(void *), void *cb_arg) {
+    (void)hal_handle;
+    (void)buf;
+    (void)len;
+    (void)done_cb;
+    (void)cb_arg;
+    return -1;
+}
+
+/**
  * @brief Generic ISR handler to be called from platform-specific ISRs.
  * 
  * Since we removed the .c file, the application (platform.c) must define 

@@ -7,9 +7,16 @@
 #include "systick.h"
 #include "arch_ops.h"
 #include "uart.h"
+#include "uart_hal.h"
+
+#define PLATFORM_UART_RX_BUF_SIZE 128U
+#define PLATFORM_UART_TX_BUF_SIZE 128U
 
 /* Default to MSI 4MHz (reset value) */
 static size_t current_cpu_freq = 4000000; 
+static uart_port_t uart2_port = NULL;
+static uint8_t uart2_rx_buf[PLATFORM_UART_RX_BUF_SIZE];
+static uint8_t uart2_tx_buf[PLATFORM_UART_TX_BUF_SIZE];
 
 /* Initialize the platform core hardware. */
 void platform_init(void) {
@@ -27,8 +34,8 @@ void platform_init(void) {
     memory_map_init();
 
     /* To be added later - enable FP and use it */
-    // volatile size_t *SCB_CPACR = (size_t *)0xE000ED88;
-    // *SCB_CPACR |= ((3UL << 10*2)|(3UL << 11*2)); 
+/* volatile size_t *SCB_CPACR = (size_t *)0xE000ED88; */
+/* *SCB_CPACR |= ((3UL << 10*2)|(3UL << 11*2)); */
 }
 
 /* Enter a critical error state (Panic). */
@@ -106,18 +113,21 @@ void platform_uart_init(void) {
     
     /* USART2 is on APB1, which runs at the same frequency as SYSCLK (80 MHz) */
     uint32_t pclk1_hz = (uint32_t)platform_get_cpu_freq();
-    uart_init(USART2, &uart_config, pclk1_hz);
+    uart2_port = uart_create(USART2, uart2_rx_buf, sizeof(uart2_rx_buf), uart2_tx_buf, sizeof(uart2_tx_buf), &uart_config, pclk1_hz);
+    if (!uart2_port) {
+        platform_panic();
+    }
 
     /* Enable UART2 interrupts in NVIC */
     NVIC_ISER1 |= (1UL << (USART2_IRQn & 0x1F));
     
     /* Enable RX interrupt for buffered reception */
-    uart_enable_rx_interrupt(USART2, 1);
+    uart_enable_rx_interrupt(uart2_port, 1);
 }
 
 int platform_uart_getc(char *out_ch) {
-    if (uart_available(USART2) > 0) {
-        return uart_read_buffer(USART2, out_ch, 1);
+    if (uart2_port && (uart_available(uart2_port) > 0)) {
+        return uart_read_buffer(uart2_port, out_ch, 1);
     }
     return 0; /* No character available */
 }
@@ -132,17 +142,23 @@ int platform_uart_puts(const char *s) {
         len++;
     }
     
-    return uart_write_buffer(USART2, s, len);
+    return uart2_port ? uart_write_buffer(uart2_port, s, len) : 0;
 }
 
 void platform_uart_set_rx_notify(uint16_t task_id) {
-    uart_set_rx_notify_task(USART2, task_id);
+    if (uart2_port) {
+        uart_set_rx_notify_task(uart2_port, task_id);
+    }
 }
 
 void platform_uart_set_rx_queue(queue_t *q) {
-    uart_set_rx_queue(USART2, q);
+    if (uart2_port) {
+        uart_set_rx_queue(uart2_port, q);
+    }
 }
 
 void platform_uart_set_tx_queue(queue_t *q) {
-    uart_set_tx_queue(USART2, q);
+    if (uart2_port) {
+        uart_set_tx_queue(uart2_port, q);
+    }
 }
