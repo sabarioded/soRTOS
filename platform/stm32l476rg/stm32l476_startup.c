@@ -1,18 +1,29 @@
-/* end of chapter 4 theres a install guide */
 #include <stdint.h>
+#include "arch_ops.h"
+#include "led.h"
 
 /* Linker script symbols */
-extern uint32_t _estack; /* Initial stack pointer */
-extern uint32_t _sidata; /* Start of init values for .data in FLASH */
-extern uint32_t _sdata; /* Start of .data in SRAM */
-extern uint32_t _edata; /* End of .data in SRAM */
-extern uint32_t _sbss; /* Start of .bss in SRAM */
-extern uint32_t _ebss; /* End of .bss in SRAM */
+extern uint32_t _estack;  /* Initial stack pointer */
+extern uint32_t _sidata;  /* Start of init values for .data in FLASH */
+extern uint32_t _sdata;   /* Start of .data in SRAM */
+extern uint32_t _edata;   /* End of .data in SRAM */
+extern uint32_t _sbss;    /* Start of .bss in SRAM */
+extern uint32_t _ebss;    /* End of .bss in SRAM */
 
 /* Forward declarations */
 void Reset_Handler(void);
 void Default_Handler(void);
 int main(void);
+
+static void startup_error_blink(void) {
+    led_init();
+    while (1) {
+        led_toggle();
+        for (volatile uint32_t i = 0; i < 200000U; ++i) {
+            arch_nop();
+        }
+    }
+}
 
 
 /* ---------- Core exception handlers (weak -> Default_Handler) ---------- */
@@ -114,18 +125,18 @@ __attribute__((section(".isr_vector")))
 __attribute__((used))
 void (* const g_pfnVectors[])(void) = {
     (void (*)(void))(&_estack), /* Initial Stack Pointer */
-    Reset_Handler, /* Reset */
-    NMI_Handler, /* NMI */
-    HardFault_Handler, /* HardFault */
-    MemManage_Handler, /* MemManage */
-    BusFault_Handler, /* BusFault */
-    UsageFault_Handler, /* UsageFault */
-    0, 0, 0, 0, /* Reserved */
-    SVC_Handler, /* SVCall */
-    DebugMon_Handler, /* DebugMon */
-    0, /* Reserved */
-    PendSV_Handler, /* PendSV */
-    SysTick_Handler, /* SysTick */
+    Reset_Handler,              /* Reset */
+    NMI_Handler,                /* NMI */
+    HardFault_Handler,          /* HardFault */
+    MemManage_Handler,          /* MemManage */
+    BusFault_Handler,           /* BusFault */
+    UsageFault_Handler,         /* UsageFault */
+    0, 0, 0, 0,                 /* Reserved */
+    SVC_Handler,                /* SVCall */
+    DebugMon_Handler,           /* DebugMon */
+    0,                          /* Reserved */
+    PendSV_Handler,             /* PendSV */
+    SysTick_Handler,            /* SysTick */
 
     /* External Interrupts */
     WWDG_IRQHandler,
@@ -231,11 +242,11 @@ void Reset_Handler(void)
     (void)main();
 
     /* If main() returns, loop forever */
-    while (1) { }
+    startup_error_blink();
 }
 
 /* ---------- Default handler ---------- */
 void Default_Handler(void)
 {
-    while (1) { /* trap */ }
+    startup_error_blink();
 }
