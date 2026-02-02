@@ -260,7 +260,9 @@ static int power_set_vos(sysclock_hz_t sysclk_hz, system_vos_t *out_vos)
 
     PWR->CR1 = tmp;
     /* wait until VOS bits are set */
-    if (wait_for_reg_mask_eq(&PWR->CR1, PWR_CR1_VOS_MASK, tmp & PWR_CR1_VOS_MASK, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    if (wait_for_reg_mask_eq(&PWR->CR1, PWR_CR1_VOS_MASK,
+                            tmp & PWR_CR1_VOS_MASK, 
+                            SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
     if (out_vos) *out_vos = vos;
@@ -284,7 +286,9 @@ static int system_clock_set_default(void) {
     tmp |= (SYSCLK_SRC_MSI << RCC_CFGR_SW_POS); /* select MSI */
     RCC->CFGR = tmp;
     /* Wait until MSI is used as system clock */
-    if (wait_for_reg_mask_eq(&RCC->CFGR, RCC_CFGR_SWS_MASK, (SYSCLK_SRC_MSI << RCC_CFGR_SWS_POS), SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    if (wait_for_reg_mask_eq(&RCC->CFGR, RCC_CFGR_SWS_MASK,
+                            (SYSCLK_SRC_MSI << RCC_CFGR_SWS_POS), 
+                            SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
     system_clock_val_hz = 4000000UL; /* MSI default frequency after reset */
@@ -316,7 +320,9 @@ static int system_clock_set_hsi16(void) {
     RCC->CFGR = tmp;
 
     /* Wait until HSI16 is used as system clock */
-    if (wait_for_reg_mask_eq(&RCC->CFGR, RCC_CFGR_SWS_MASK, (SYSCLK_SRC_HSI16 << RCC_CFGR_SWS_POS), SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+    if (wait_for_reg_mask_eq(&RCC->CFGR, RCC_CFGR_SWS_MASK, 
+                            (SYSCLK_SRC_HSI16 << RCC_CFGR_SWS_POS), 
+                            SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
         return SYSTEM_CLOCK_ERR_TIMEOUT;
     }
     return SYSTEM_CLOCK_OK;
@@ -325,11 +331,15 @@ static int system_clock_set_hsi16(void) {
 /* configure the system clock */
 int system_clock_config_hz(sysclock_hz_t target_hz) {
     /* first return to default sysclk for safety */
-    if (system_clock_set_default() != SYSTEM_CLOCK_OK) return SYSTEM_CLOCK_ERR_TIMEOUT;
+    if (system_clock_set_default() != SYSTEM_CLOCK_OK) {
+        return SYSTEM_CLOCK_ERR_TIMEOUT;
+    }
 
     /* set up power range according to sysclk */
     system_vos_t vos;
-    if (power_set_vos(target_hz, &vos) != SYSTEM_CLOCK_OK) return SYSTEM_CLOCK_ERR_TIMEOUT;
+    if (power_set_vos(target_hz, &vos) != SYSTEM_CLOCK_OK) {
+        return SYSTEM_CLOCK_ERR_TIMEOUT;
+    }
 
     /* set up flash latency according to sysclk*/
     flash_set_latency(target_hz, vos);
@@ -385,7 +395,9 @@ int system_clock_config_hz(sysclock_hz_t target_hz) {
 
         /* Disable PLL */
         RCC->CR &= ~RCC_CR_PLLON;
-        if (wait_for_flag_clear(&RCC->CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) return SYSTEM_CLOCK_ERR_TIMEOUT;
+        if (wait_for_flag_clear(&RCC->CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+            return SYSTEM_CLOCK_ERR_TIMEOUT;
+        }
 
         /* Configure PLL */
         uint32_t tmp = RCC->PLLCFGR;
@@ -402,14 +414,21 @@ int system_clock_config_hz(sysclock_hz_t target_hz) {
 
         /* Enable PLL */
         RCC->CR |= RCC_CR_PLLON;
-        if (wait_for_flag_set(&RCC->CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) return SYSTEM_CLOCK_ERR_TIMEOUT;
+        if (wait_for_flag_set(&RCC->CR, RCC_CR_PLLRDY, SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+            return SYSTEM_CLOCK_ERR_TIMEOUT;
+        }
         /* Switch SYSCLK to PLL */
         tmp = RCC->CFGR;
         tmp &= ~(RCC_CFGR_SW_MASK); /* clear SW bits */
         tmp |= (SYSCLK_SRC_PLL << RCC_CFGR_SW_POS); /* select PLL */
         RCC->CFGR = tmp;
         /* Wait until PLL is used as system clock */
-        if (wait_for_reg_mask_eq(&RCC->CFGR, RCC_CFGR_SWS_MASK, (SYSCLK_SRC_PLL << RCC_CFGR_SWS_POS), SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) return SYSTEM_CLOCK_ERR_TIMEOUT;
+        if (wait_for_reg_mask_eq(&RCC->CFGR, 
+                                RCC_CFGR_SWS_MASK, 
+                                (SYSCLK_SRC_PLL << RCC_CFGR_SWS_POS), 
+                                SYSTEM_CLOCK_WAIT_MAX_ITER) != 0) {
+            return SYSTEM_CLOCK_ERR_TIMEOUT;
+        }
         system_clock_val_hz = target_hz;
         return SYSTEM_CLOCK_OK;
     } else {
