@@ -60,8 +60,16 @@ extern "C" {
 /************* SCB base *****************/
 #define SCB_BASE                (SCS_BASE + 0x0D00UL) /* 0xE000ED00 */
 
+/************* System Control Block registers *****************/
+#define SCB_CPACR               (SCS_BASE + 0x0D88UL) /* 0xE000ED88 */
+#define SCB_CPACR_REG           (*(volatile uint32_t *)SCB_CPACR)
+
 /************* NVIC base *****************/
 #define NVIC_BASE               (SCS_BASE + 0x0100UL) /* 0xE000E100UL */
+
+/************* FPU base *****************/
+#define FPU_FPCCR               (SCS_BASE + 0x0F34UL) /* 0xE000EF34 */
+#define FPU_FPCCR_REG           (*(volatile uint32_t *)FPU_FPCCR)
 
 /************* REGISTER STRUCTURES *****************/
 /************* RCC Registers *****************/
