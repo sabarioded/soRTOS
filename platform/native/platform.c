@@ -104,14 +104,29 @@ void platform_start_scheduler(size_t stack_pointer) {
     printf("[INFO] Native scheduler started.\n[WARN] Context switching not implemented on native target.\n[WARN] Only the main thread (CLI) will run.\n");
 }
 
-void platform_yield(void) { }
-void platform_reset(void) { exit(0); }
+void platform_yield(void) {
+
+ }
+
+void platform_reset(void) { 
+    exit(0); 
+}
 
 void *platform_initialize_stack(void *top_of_stack, void (*task_func)(void *), void *arg, void (*exit_handler)(void)) {
-    (void)task_func; (void)arg; (void)exit_handler;
+    (void)task_func; 
+    (void)arg; 
+    (void)exit_handler;
     return top_of_stack;
 }
 
-void platform_uart_set_rx_notify(uint16_t task_id) { (void)task_id; }
-void platform_uart_set_rx_queue(queue_t *q) { (void)q; }
-void platform_uart_set_tx_queue(queue_t *q) { (void)q; }
+void platform_uart_set_rx_notify(uint16_t task_id) { 
+    (void)task_id; 
+}
+
+void platform_uart_set_rx_queue(queue_t *q) { 
+    (void)q; 
+}
+
+void platform_uart_set_tx_queue(queue_t *q) { 
+    (void)q; 
+}
