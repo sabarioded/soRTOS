@@ -12,11 +12,29 @@
 #define PLATFORM_UART_RX_BUF_SIZE 128U
 #define PLATFORM_UART_TX_BUF_SIZE 128U
 
+#define SCB_CPACR_CP10_FULL     (3UL << 20) /* CPACR: full access for CP10 */
+#define SCB_CPACR_CP11_FULL     (3UL << 22) /* CPACR: full access for CP11 */
+#define FPU_FPCCR_ASPEN         (1UL << 31) /* FPCCR: automatic state preservation */
+#define FPU_FPCCR_LSPEN         (1UL << 30) /* FPCCR: lazy state preservation */
+
 /* Default to MSI 4MHz (reset value) */
 static size_t current_cpu_freq = 4000000; 
 static uart_port_t uart2_port = NULL;
 static uint8_t uart2_rx_buf[PLATFORM_UART_RX_BUF_SIZE];
 static uint8_t uart2_tx_buf[PLATFORM_UART_TX_BUF_SIZE];
+
+/* Enable FPU and lazy stacking for Cortex-M4F. */
+static void platform_fpu_init(void) {
+#if defined(__ARM_FP) && (__ARM_FP != 0)
+    /* CPACR: enable full access to CP10/CP11 (FPU coprocessors)*/
+    SCB_CPACR_REG |= SCB_CPACR_CP10_FULL | SCB_CPACR_CP11_FULL;
+    arch_dsb();
+    arch_isb();
+
+    /* FPCCR: enable automatic and lazy state preservation */
+    FPU_FPCCR_REG |= FPU_FPCCR_ASPEN | FPU_FPCCR_LSPEN;
+#endif
+}
 
 /* Initialize the platform core hardware. */
 void platform_init(void) {
@@ -33,9 +51,7 @@ void platform_init(void) {
 
     memory_map_init();
 
-    /* To be added later - enable FP and use it */
-/* volatile size_t *SCB_CPACR = (size_t *)0xE000ED88; */
-/* *SCB_CPACR |= ((3UL << 10*2)|(3UL << 11*2)); */
+    platform_fpu_init();
 }
 
 /* Enter a critical error state (Panic). */
@@ -113,7 +129,12 @@ void platform_uart_init(void) {
     
     /* USART2 is on APB1, which runs at the same frequency as SYSCLK (80 MHz) */
     uint32_t pclk1_hz = (uint32_t)platform_get_cpu_freq();
-    uart2_port = uart_create(USART2, uart2_rx_buf, sizeof(uart2_rx_buf), uart2_tx_buf, sizeof(uart2_tx_buf), &uart_config, pclk1_hz);
+    uart2_port = uart_create(USART2, 
+                            uart2_rx_buf, 
+                            sizeof(uart2_rx_buf), 
+                            uart2_tx_buf, 
+                            sizeof(uart2_tx_buf), 
+                            &uart_config, pclk1_hz);
     if (!uart2_port) {
         platform_panic();
     }
