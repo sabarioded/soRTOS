@@ -43,7 +43,13 @@ ifeq ($(PLATFORM), stm32l476rg)
 	CC = arm-none-eabi-gcc
 	
 	# Architecture Flags
-	MCU_FLAGS = -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+	FPU ?= 1
+	MCU_FLAGS = -mcpu=cortex-m4 -mthumb
+ifeq ($(FPU), 1)
+	MCU_FLAGS += -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+else
+	MCU_FLAGS += -mfloat-abi=soft
+endif
 	
 	# Platform Sources
 	C_SRCS += \
