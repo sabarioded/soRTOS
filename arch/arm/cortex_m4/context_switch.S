@@ -13,6 +13,7 @@
 
 /* Interrupt Control and State Register */
 .equ SCB_ICSR,       0xE000ED04 
+
 /* System Handler Priority Register 3 - [31:24]SysTick, [23:16] PendSV */
 .equ SCB_SHPR3,      0xE000ED20
 
@@ -26,6 +27,19 @@
 /* EXC_RETURN: Thread mode, return to use PSP */
 .equ EXC_RETURN_THREAD_PSP, 0xFFFFFFFD
 
+/*
+ * Stack layout expectations:
+ *
+ * 1) Initial task stack (created by arch_initialize_stack):
+ *    [R4-R11][HW frame: R0-R3,R12,LR,PC,xPSR]
+ *
+ * 2) After a context switch (PendSV saves):
+ *    [optional s16-s31][R4-R11][EXC_RETURN][HW frame]
+ *
+ * task_create_first restores R4-R11 then performs an exception return
+ * so the CPU pops the HW frame. PendSV restores EXC_RETURN/R4-R11 and
+ * optionally FP regs before returning.
+ */
 
 /* Set up and start the first task */
 .type task_create_first, %function
@@ -53,24 +67,17 @@ task_create_first:
     /* set PSP = task_get_current()->psp so thread mode tasks will use it */
     BL  task_get_current        /* r0 = task_current */
     LDR r0, [r0]                /* r0 = task_current->psp */
-    ADD r0, r0, #4              /* Skip LR (EXC_RETURN) on stack */
     LDMIA r0!, {r4-r11}         /* restore R4-R11 from task stack */
-    MSR PSP, r0                 /* PSP = task_current->psp */
+    MSR PSP, r0                 /* PSP = task_current->psp (now at HW frame) */
 
     /* update control to priviliged thread mode */
     MOVS r0, #2                 /* r0 = 0x2 */
     MSR CONTROL, r0             /* CONTROL = 0x2 */
     ISB                         /* instruction sync barrier */
 
-    /* Manually pop hardware frame */
-    POP {r0-r3}       /* Pop R0 (arg), R1, R2, R3 */
-    POP {r4}          /* Pop R12 (garbage) into R4 */
-    POP {lr}          /* Pop LR (Return Address / Error Handler) */
-    POP {r5}          /* Pop PC (Task Entry Point) into R5 */
-    POP {r6}          /* Pop xPSR (Status Reg) into R6 */
-
-    /* Jump to the task */
-    BX  r5            /* Jump to the address we popped into R5 */
+    /* Exception return to start the first task */
+    LDR lr, =EXC_RETURN_THREAD_PSP
+    BX  lr
 
 
 /* Perform a context switch */
@@ -80,17 +87,19 @@ PendSV_Handler:
     MRS r0, PSP                 /* r0 = PSP */
 
     /* Check if FPU was used (Bit 4 of LR is 0) */
-    TST lr, #0x10
-    IT EQ
+#if defined(__ARM_FP) && (__ARM_FP != 0)
+    TST lr, #0x10               /* test EXC_RETURN bit 4 (0 means FP context stacked) */
+    IT EQ                       /* if zero, execute next instruction */
     VSTMDBEQ r0!, {s16-s31}     /* Save FPU Callee-Saved Registers */
+#endif
 
     STMDB r0!, {r4-r11}         /* save R4-R11 on task stack */
     STMDB r0!, {lr}             /* save EXC_RETURN on task stack */
 
     /* Save PSP into current task */
     MOV r4, r0                  /* r4 = updated PSP */
-    BL  task_get_current        /* r0 = task_current */
-    MOV r1, r0
+    BL  task_get_current        /* result of task_current returned to r0 */
+    MOV r1, r0                  /* r1 = task_current */
     STR r4, [r1]                /* task_current->psp = r4 */
 
     /* call the scheduler to select the next task */
@@ -99,16 +108,18 @@ PendSV_Handler:
     POP  {lr}                   /* restore EXC_RETURN so BX lr works later */
 
     /* restore the context of the next task */
-    BL  task_get_current        /* r0 = task_current (next) */
+    BL  task_get_current        /* result of task_current returned to r0 */
     LDR r0, [r0]                /* r0 = task_current->psp */
     
     LDMIA r0!, {lr}             /* restore EXC_RETURN */
     LDMIA r0!, {r4-r11}         /* restore R4-R11 from task stack */
 
     /* Check if we need to restore FPU */
+#if defined(__ARM_FP) && (__ARM_FP != 0)
     TST lr, #0x10
     IT EQ
     VLDMIAEQ r0!, {s16-s31}     /* Restore FPU Callee-Saved Registers */
+#endif
 
     MSR PSP, r0                 /* PSP = r0 */
 
