@@ -4,15 +4,6 @@
 #include <stddef.h>
 
 /**
- * @file memory_map.h
- * @brief Platform-specific Memory Layout Definitions
- *
- * This file abstracts the Linker Script symbols and provides a clean
- * API to initialize the kernel's memory allocator with the correct
- * physical addresses for this specific board.
- */
-
-/**
  * @brief Initialize the Kernel Allocator with platform-specific heap regions.
  */
 void memory_map_init(void);

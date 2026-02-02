@@ -1,4 +1,4 @@
-#include "allocator.h" /* Your generic kernel allocator */
+#include "allocator.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <platform.h>
