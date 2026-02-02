@@ -34,13 +34,6 @@ soRTOS is a real-time operating system built from scratch in C. It was designed 
 
 The entire system is **platform-agnostic**, with clean separation between core kernel logic, hardware drivers, and architecture-specific code. While it currently includes support for STM32l476rg (ARM Cortex-M4) and native simulation, the modular design makes it straightforward to port to different architectures.
 
-### Design Philosophy
-
-*   **Deterministic Performance:** All kernel operations have guaranteed time complexity
-*   **Real-Time Ready:** Designed for systems requiring predictable timing behavior
-*   **Memory Efficient:** Minimal overhead with configurable resource limits
-*   **Modular Architecture:** Clean separation between kernel, architecture, and platform layers
-
 ---
 
 ## Key Features
@@ -347,6 +340,18 @@ Compiles the kernel, drivers, and application code into an ELF file for embedded
 make PLATFORM=stm32l476rg
 ```
 
+To toggle hardware floating point support on Cortex-M4F builds, use the `FPU` flag:
+
+```bash
+# FPU enabled (default)
+make PLATFORM=stm32l476rg FPU=1
+
+# FPU disabled (soft-float ABI)
+make PLATFORM=stm32l476rg FPU=0
+```
+
+When `FPU=0`, the build emits no FPU instructions and the context switch skips FP save/restore.
+
 #### Flash to Board
 
 Flash the compiled binary to the target board:
@@ -470,17 +475,6 @@ Comprehensive documentation is available for all kernel components:
 *   **[SysTick](docs/drivers/systick.md)** - System tick timer
 *   **[UART](docs/drivers/uart.md)** - UART serial communication
 *   **[Watchdog](docs/drivers/watchdog.md)** - Independent watchdog timer
-
-### Documentation Style
-
-All documentation follows a consistent structure:
-*   **Overview** with key features
-*   **Architecture** diagrams (Mermaid)
-*   **Algorithms** with detailed explanations
-*   **Performance Analysis** (time/space complexity)
-*   **Example Scenarios** with timelines
-*   **API Reference** with function signatures
-*   **Code Snippets** appendix
 
 ---
 
