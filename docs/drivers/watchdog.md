@@ -5,7 +5,6 @@
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
@@ -84,11 +83,3 @@ void main_task(void) {
 ```
 
 ---
-
-## Configuration
-
-Watchdog configuration includes:
-- Timeout period selection
-- Platform-specific clock source and prescaler settings (handled in the HAL)
-
-The timeout range is limited by hardware constraints and clock frequency. Consult the platform HAL for exact limits.</content>
