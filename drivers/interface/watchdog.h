@@ -8,11 +8,11 @@ extern "C" {
 #endif
 
 /**
- * @brief Initialize and start the Independent Watchdog (IWDG).
+ * @brief Initialize and start the Independent Watchdog.
  * 
  * @param timeout_ms Desired timeout in milliseconds.
- *                   The actual timeout might be slightly different depending on hardware constraints.
- * @return int 0 on success, -1 on error (e.g. timeout out of range).
+ * The actual timeout might be slightly different depending on hardware constraints.
+ * @return int 0 on success, -1 on error.
  */
 int watchdog_init(uint32_t timeout_ms);
 

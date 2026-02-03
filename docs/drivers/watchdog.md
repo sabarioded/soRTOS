@@ -11,7 +11,7 @@
 
 ## Overview
 
-The Watchdog driver provides system monitoring using the Independent Watchdog (IWDG) peripheral. It can reset the system if the application fails to periodically refresh the watchdog, helping detect and recover from software hangs.
+The Watchdog driver provides a platform-agnostic API for system monitoring. It resets the system if the application fails to periodically refresh the watchdog, helping detect and recover from software hangs.
 
 ### Key Features
 
@@ -24,12 +24,12 @@ The Watchdog driver provides system monitoring using the Independent Watchdog (I
 
 ## Architecture
 
-The watchdog driver configures the IWDG to monitor system health. The watchdog must be periodically "kicked" to prevent automatic system reset, ensuring the application is running correctly.
+The watchdog driver exposes a generic interface and delegates all hardware-specific configuration to the platform HAL. The watchdog must be periodically "kicked" to prevent automatic system reset, ensuring the application is running correctly.
 
 **Logic Flow:**
 
 1.  **Init:** Application sets a timeout (e.g., 5000ms).
-2.  **Run:** The Independent Window Watchdog Timer (IWDG) counts down.
+2.  **Run:** The platform watchdog peripheral counts down.
 3.  **Kick:** Application calls `watchdog_kick()` resets the counter to the reload value.
 4.  **Timeout:** If the counter reaches 0 (Application hung):
     *   **Action:** The Watchdog hardware forces a System Reset.
@@ -89,7 +89,6 @@ void main_task(void) {
 
 Watchdog configuration includes:
 - Timeout period selection
-- Clock source
-- Prescaler settings
+- Platform-specific clock source and prescaler settings (handled in the HAL)
 
-The timeout range is limited by hardware constraints and clock frequency.</content>
+The timeout range is limited by hardware constraints and clock frequency. Consult the platform HAL for exact limits.</content>
