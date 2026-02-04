@@ -11,12 +11,6 @@
 typedef struct uart_context* uart_port_t;
 
 /**
- * @brief UART callback function type for async operations.
- * @param arg User-provided argument.
- */
-typedef void (*uart_callback_t)(void *arg);
-
-/**
  * @brief Sets up the UART hardware with the specific settings provided.
  * This prepares the port for sending and receiving data.
  * Allocates memory for the UART context.
@@ -30,11 +24,16 @@ typedef void (*uart_callback_t)(void *arg);
  * @param clock_freq The frequency of the source clock feeding this peripheral (in Hz).
  * @return Pointer to the allocated UART handle, or NULL on failure.
  */
-uart_port_t uart_create(void *hal_handle, uint8_t *rx_buf, size_t rx_size, uint8_t *tx_buf, size_t tx_size, void *config, uint32_t clock_freq);
+uart_port_t uart_create(void *hal_handle, 
+                        uint8_t *rx_buf, 
+                        size_t rx_size, 
+                        uint8_t *tx_buf, 
+                        size_t tx_size, 
+                        void *config, 
+                        uint32_t clock_freq);
 
 /**
  * @brief Initializes a UART context in a user-provided memory block.
- * Use this to avoid malloc/heap usage.
  * 
  * @param memory_block Pointer to a block of memory of size uart_get_context_size().
  * @param hal_handle Pointer to the low-level hardware handle.
@@ -46,7 +45,14 @@ uart_port_t uart_create(void *hal_handle, uint8_t *rx_buf, size_t rx_size, uint8
  * @param clock_freq The frequency of the source clock.
  * @return Handle to the initialized UART port.
  */
-uart_port_t uart_init(void *memory_block, void *hal_handle, uint8_t *rx_buf, size_t rx_size, uint8_t *tx_buf, size_t tx_size, void *config, uint32_t clock_freq);
+uart_port_t uart_init(void *memory_block, 
+                      void *hal_handle, 
+                      uint8_t *rx_buf, 
+                      size_t rx_size, 
+                      uint8_t *tx_buf, 
+                      size_t tx_size, 
+                      void *config, 
+                      uint32_t clock_freq);
 
 /**
  * @brief Frees the memory allocated for the UART context.
@@ -57,7 +63,7 @@ void uart_destroy(uart_port_t port);
 /**
  * @brief Get the HAL handle associated with the UART port.
  * @param port Handle to the UART port.
- * @return Pointer to the HAL handle (e.g. USART_TypeDef*).
+ * @return Pointer to the HAL handle.
  */
 void *uart_get_hal_handle(uart_port_t port);
 
@@ -89,14 +95,14 @@ int uart_read_buffer(uart_port_t port, char *buf, size_t len);
 int uart_write_buffer(uart_port_t port, const char *buf, size_t len);
 
 /**
- * @brief Turns the Receive Interrupt (RXNE) on or off.
+ * @brief Turns the Receive Interrupt on or off.
  * @param port Handle to the UART port.
  * @param enable 1 to enable, 0 to disable.
  */
 void uart_enable_rx_interrupt(uart_port_t port, uint8_t enable);
 
 /**
- * @brief Turns the Transmit Interrupt (TXE) on or off.
+ * @brief Turns the Transmit Interrupt on or off.
  * @param port Handle to the UART port.
  * @param enable 1 to enable, 0 to disable.
  */
@@ -124,28 +130,6 @@ void uart_set_rx_queue(uart_port_t port, queue_t *q);
 void uart_set_tx_queue(uart_port_t port, queue_t *q);
 
 /**
- * @brief Start a DMA-based TX transfer.
- * @param port Handle to the UART port.
- * @param buf Data to transmit.
- * @param len Number of bytes.
- * @param callback Function to call when DMA transfer completes.
- * @param arg User argument.
- * @return 0 on success, -1 on error.
- */
-int uart_write_dma(uart_port_t port, const uint8_t *buf, size_t len, uart_callback_t callback, void *arg);
-
-/**
- * @brief Start a DMA-based RX transfer.
- * @param port Handle to the UART port.
- * @param buf Buffer to store received data.
- * @param len Number of bytes.
- * @param callback Function to call when DMA transfer completes.
- * @param arg User argument.
- * @return 0 on success, -1 on error.
- */
-int uart_read_dma(uart_port_t port, uint8_t *buf, size_t len, uart_callback_t callback, void *arg);
-
-/**
  * @brief Called by the HAL when a byte is received.
  * @param port Handle to the UART port.
  * @param byte The byte received.
@@ -168,7 +152,7 @@ void uart_core_rx_error_callback(uart_port_t port);
 
 /**
  * @brief Get the size of the UART context structure.
- * This is useful when the application wants to allocate memory for the context statically or on the stack.
+ * This is useful when the application wants to allocate memory for the context.
  * @return Size of struct uart_context in bytes.
  */
 size_t uart_get_context_size(void);

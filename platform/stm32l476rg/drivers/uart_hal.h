@@ -6,7 +6,7 @@
 #include "gpio_hal.h"
 #include "uart.h"
 
-/* RCC & GPIO Definitions */
+/* RCC clock enable bits for USART/UART peripherals */
 #define RCC_APB1ENR1_USART2EN       (1UL << 17)
 #define RCC_APB1ENR1_USART3EN       (1UL << 18)
 #define RCC_APB1ENR1_UART4EN        (1UL << 19)
@@ -14,6 +14,7 @@
 #define RCC_APB2ENR_USART1EN        (1UL << 14)
 #define RCC_APB1ENR2_LPUART1EN      (1UL << 0)
 
+/* USART control register 1 (CR1) bit definitions */
 #define USART_CR1_UE                (1UL << 0)
 #define USART_CR1_RE                (1UL << 2)
 #define USART_CR1_TE                (1UL << 3)
@@ -25,6 +26,7 @@
 #define USART_CR1_OVER8             (1UL << 15)
 #define USART_CR1_M1                (1UL << 28)
 
+/* USART interrupt/status register (ISR) flags */
 #define USART_ISR_PE                (1UL << 0)
 #define USART_ISR_FE                (1UL << 1)
 #define USART_ISR_NE                (1UL << 2)
@@ -32,17 +34,19 @@
 #define USART_ISR_RXNE              (1UL << 5)
 #define USART_ISR_TXE               (1UL << 7)
 
+/* USART interrupt flag clear register (ICR) bits */
 #define USART_ICR_PECF              (1UL << 0)
 #define USART_ICR_FECF              (1UL << 1)
 #define USART_ICR_NECF              (1UL << 2)
 #define USART_ICR_ORECF             (1UL << 3)
 
+/* USART control register 2 (CR2) stop-bit field */
 #define USART_CR2_STOP_Pos          (12)
 #define USART_CR2_STOP_Msk          (3UL << USART_CR2_STOP_Pos)
 
 typedef enum {
     UART_WORDLENGTH_8B = 0, /* Standard 8-bit data mode. */
-    UART_WORDLENGTH_9B      /* 9-bit data mode (often used for parity or multi-processor comms). */
+    UART_WORDLENGTH_9B      /* 9-bit data mode. */
 } UART_WordLength_t;
 
 typedef enum {
@@ -52,8 +56,8 @@ typedef enum {
 } UART_Parity_t;
 
 typedef enum {
-    UART_STOPBITS_1 = 0,    /* Single stop bit (standard). */
-    UART_STOPBITS_2         /* Two stop bits (useful for slower devices). */
+    UART_STOPBITS_1 = 0,    /* Single stop bit. */
+    UART_STOPBITS_2         /* Two stop bits. */
 } UART_StopBits_t;
 
 typedef struct {
@@ -115,8 +119,12 @@ static inline void uart_hal_init(void *hal_handle, void *config_ptr, uint32_t cl
 {
     USART_TypeDef *UARTx = (USART_TypeDef *)hal_handle;
     UART_Config_t *config = (UART_Config_t *)config_ptr;
-    if ((UARTx == NULL) || (config == NULL) || (config->BaudRate == 0U)) return;
+    /* Validate args */
+    if ((UARTx == NULL) || (config == NULL) || (config->BaudRate == 0U)) {
+        return;
+    }
 
+    /* Enable peripheral clock and configure GPIO pins */
     uart_hal_enable_clocks_and_pins(UARTx);
 
     /* Disable UART */
@@ -126,33 +134,47 @@ static inline void uart_hal_init(void *hal_handle, void *config_ptr, uint32_t cl
     uint32_t cr1 = UARTx->CR1;
     cr1 &= ~(USART_CR1_M0 | USART_CR1_M1 | USART_CR1_PCE | USART_CR1_PS | USART_CR1_OVER8);
     
-    if (config->WordLength == UART_WORDLENGTH_9B) cr1 |= USART_CR1_M0;
+    if (config->WordLength == UART_WORDLENGTH_9B) {
+        /* 9-bit word length uses M0=1, M1=0 */
+        cr1 |= USART_CR1_M0;
+    }
     
     if (config->Parity != UART_PARITY_NONE) {
+        /* Enable parity and select odd/even */
         cr1 |= USART_CR1_PCE;
-        if (config->Parity == UART_PARITY_ODD) cr1 |= USART_CR1_PS;
+        if (config->Parity == UART_PARITY_ODD) {
+            cr1 |= USART_CR1_PS;
+        }
     }
 
-    if (UARTx != LPUART1 && config->OverSampling8) cr1 |= USART_CR1_OVER8;
+    if (UARTx != LPUART1 && config->OverSampling8) {
+        /* LPUART1 does not support oversampling by 8 */
+        cr1 |= USART_CR1_OVER8;
+    }
 
     UARTx->CR1 = cr1;
 
     /* Configure Stop Bits */
     UARTx->CR2 &= ~USART_CR2_STOP_Msk;
-    if (config->StopBits == UART_STOPBITS_2) UARTx->CR2 |= (2UL << USART_CR2_STOP_Pos);
+    if (config->StopBits == UART_STOPBITS_2) {
+        UARTx->CR2 |= (2UL << USART_CR2_STOP_Pos);
+    }
 
     /* Baud Rate */
     uint32_t baud = config->BaudRate;
     uint32_t usartdiv;
 
     if (UARTx == LPUART1) {
+        /* LPUART uses a different BRR encoding (256x) */
         usartdiv = (uint32_t)( ((uint64_t)clock_freq * 256U + (baud / 2U)) / baud );
         UARTx->BRR = usartdiv;
     } else {
         if ((UARTx->CR1 & USART_CR1_OVER8) == 0U) {
+            /* Oversampling by 16 */
             usartdiv = (clock_freq + (baud / 2U)) / baud;
             UARTx->BRR = usartdiv;
         } else {
+            /* Oversampling by 8 */
             usartdiv = ((clock_freq * 2U) + (baud / 2U)) / baud;
             UARTx->BRR = (usartdiv & 0xFFF0U) | ((usartdiv & 0x000FU) >> 1U);
         }
@@ -171,8 +193,12 @@ static inline void uart_hal_enable_rx_interrupt(void *hal_handle, uint8_t enable
 {
     USART_TypeDef *UARTx = (USART_TypeDef *)hal_handle;
     if (UARTx) {
-        if (enable) UARTx->CR1 |= USART_CR1_RXNEIE;
-        else UARTx->CR1 &= ~USART_CR1_RXNEIE;
+        if (enable) {
+            UARTx->CR1 |= USART_CR1_RXNEIE;
+        }
+        else {
+            UARTx->CR1 &= ~USART_CR1_RXNEIE;
+        }
     }
 }
 
@@ -185,8 +211,12 @@ static inline void uart_hal_enable_tx_interrupt(void *hal_handle, uint8_t enable
 {
     USART_TypeDef *UARTx = (USART_TypeDef *)hal_handle;
     if (UARTx) {
-        if (enable) UARTx->CR1 |= USART_CR1_TXEIE;
-        else UARTx->CR1 &= ~USART_CR1_TXEIE;
+        if (enable) {
+            UARTx->CR1 |= USART_CR1_TXEIE;
+        }
+        else {
+            UARTx->CR1 &= ~USART_CR1_TXEIE;
+        }
     }
 }
 
@@ -197,43 +227,13 @@ static inline void uart_hal_enable_tx_interrupt(void *hal_handle, uint8_t enable
  */
 static inline void uart_hal_write_byte(void *hal_handle, uint8_t byte) {
     USART_TypeDef *UARTx = (USART_TypeDef *)hal_handle;
-    if (UARTx) UARTx->TDR = byte;
-}
-
-/**
- * @brief Start a DMA-based UART TX transfer.
- * @return 0 on success, -1 on error.
- */
-static inline int uart_hal_start_tx_dma(void *hal_handle, const uint8_t *buf, size_t len,
-                                        void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle;
-    (void)buf;
-    (void)len;
-    (void)done_cb;
-    (void)cb_arg;
-    return -1;
-}
-
-/**
- * @brief Start a DMA-based UART RX transfer.
- * @return 0 on success, -1 on error.
- */
-static inline int uart_hal_start_rx_dma(void *hal_handle, uint8_t *buf, size_t len,
-                                        void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle;
-    (void)buf;
-    (void)len;
-    (void)done_cb;
-    (void)cb_arg;
-    return -1;
+    if (UARTx) {
+        UARTx->TDR = byte;
+    }
 }
 
 /**
  * @brief Generic ISR handler to be called from platform-specific ISRs.
- * 
- * Since we removed the .c file, the application (platform.c) must define 
- * the ISR (e.g. USART2_IRQHandler) and call this function, passing the 
- * hardware handle and the software port handle.
  * 
  * @param hal_handle Pointer to the UART hardware register block.
  * @param port Handle to the UART port context.
@@ -241,7 +241,9 @@ static inline int uart_hal_start_rx_dma(void *hal_handle, uint8_t *buf, size_t l
 static inline void uart_hal_irq_handler(void *hal_handle, uart_port_t port)
 {
     USART_TypeDef *UARTx = (USART_TypeDef *)hal_handle;
-    if (!UARTx || !port) return;
+    if (!UARTx || !port) {
+        return;
+    }
 
     /* Error Handling */
     if (UARTx->ISR & (USART_ISR_PE | USART_ISR_FE | USART_ISR_NE | USART_ISR_ORE)) {
