@@ -6,20 +6,12 @@
 - [Architecture](#architecture)
 - [Protocol](#protocol)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
 ## Overview
 
 The SPI (Serial Peripheral Interface) driver provides synchronous serial communication for connecting to SPI slave devices. It supports full-duplex data transfer with configurable parameters.
-
-### Key Features
-
-- Full-duplex synchronous communication
-- Master-mode operation
-- Configurable SPI parameters (clock, mode, etc.)
-- Memory-efficient context management
 
 ---
 
@@ -85,13 +77,3 @@ spi_destroy(spi);
 ```
 
 ---
-
-## Configuration
-
-SPI configuration includes:
-- Clock frequency
-- Clock polarity and phase (SPI mode)
-- Data frame format (8-bit)
-- Master/slave mode
-- NSS (chip select) management</content>
-- NSS (chip select) management

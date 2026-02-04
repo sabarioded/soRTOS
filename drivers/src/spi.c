@@ -4,25 +4,23 @@
 #include "utils.h"
 
 struct spi_context {
-    void *hal_handle;
-
-    /* Async State */
-    const uint8_t *tx_buf;
-    uint8_t *rx_buf;
-    volatile size_t transfer_len;
-    volatile size_t tx_count;
-    volatile size_t rx_count;
-    volatile uint8_t busy;
-    spi_callback_t dma_callback;
-    void *dma_cb_arg;
-    spi_callback_t callback;
-    void *cb_arg;
+    void *hal_handle;          /* Hardware handle (passed to HAL) */
+    void *cb_arg;              /* User argument for async callback */
+    const uint8_t *tx_buf;     /* Pointer to transmit buffer */
+    uint8_t *rx_buf;           /* Pointer to receive buffer */
+    spi_callback_t callback;   /* Async completion callback */
+    volatile size_t transfer_len; /* Total bytes to transfer */
+    volatile size_t tx_count;  /* Number of bytes transmitted */
+    volatile size_t rx_count;  /* Number of bytes received */
+    volatile uint8_t busy;     /* Non-zero while an async transfer is active */
 };
 
+/* Get the size of the SPI context structure */
 size_t spi_get_context_size(void) {
     return sizeof(struct spi_context);
 }
 
+/* Initialize a SPI context in caller-provided memory */
 spi_port_t spi_init(void *memory_block, void *hal_handle, void *config) {
     if (!memory_block || !hal_handle) {
         return NULL;
@@ -40,6 +38,7 @@ spi_port_t spi_init(void *memory_block, void *hal_handle, void *config) {
     return port;
 }
 
+/* Create and initialize a SPI context (allocates memory) */
 spi_port_t spi_create(void *hal_handle, void *config) {
     void *mem = allocator_malloc(sizeof(struct spi_context));
     if (!mem) {
@@ -48,14 +47,18 @@ spi_port_t spi_create(void *hal_handle, void *config) {
     return spi_init(mem, hal_handle, config);
 }
 
+/* Destroy a SPI context created with spi_create */
 void spi_destroy(spi_port_t port) {
     if (port) {
         allocator_free(port);
     }
 }
 
-int spi_transfer(spi_port_t port, const uint8_t *tx_data, uint8_t *rx_data,
-                 size_t len) {
+/* Blocking, polled SPI transfer */
+int spi_transfer(spi_port_t port, 
+                const uint8_t *tx_data, 
+                uint8_t *rx_data,
+                size_t len) {
     if (!port || !port->hal_handle) {
         return -1;
     }
@@ -75,9 +78,13 @@ int spi_transfer(spi_port_t port, const uint8_t *tx_data, uint8_t *rx_data,
     return 0;
 }
 
-int spi_transfer_async(spi_port_t port, const uint8_t *tx_data,
-                       uint8_t *rx_data, size_t len, spi_callback_t callback,
-                       void *arg) {
+/* Interrupt-driven transfer. completion via callback */
+int spi_transfer_async(spi_port_t port, 
+                    const uint8_t *tx_data,
+                    uint8_t *rx_data, 
+                    size_t len, 
+                    spi_callback_t callback,
+                    void *arg) {
     if (!port || !port->hal_handle || len == 0) {
         return -1;
     }
@@ -105,45 +112,8 @@ int spi_transfer_async(spi_port_t port, const uint8_t *tx_data,
     return 0;
 }
 
-static void spi_dma_done(void *arg) {
-    spi_port_t port = (spi_port_t)arg;
-    if (!port) {
-        return;
-    }
-    port->busy = 0;
-    if (port->dma_callback) {
-        port->dma_callback(port->dma_cb_arg);
-    }
-}
-
-int spi_transfer_dma(spi_port_t port, const uint8_t *tx_data,
-                     uint8_t *rx_data, size_t len, spi_callback_t callback,
-                     void *arg) {
-    if (!port || !port->hal_handle || len == 0) {
-        return -1;
-    }
-    if (port->busy) {
-        return -1;
-    }
-
-    port->tx_buf = tx_data;
-    port->rx_buf = rx_data;
-    port->transfer_len = len;
-    port->tx_count = 0;
-    port->rx_count = 0;
-    port->dma_callback = callback;
-    port->dma_cb_arg = arg;
-    port->busy = 1;
-
-    if (spi_hal_transfer_dma(port->hal_handle, tx_data, rx_data, len, spi_dma_done, port) != 0) {
-        port->busy = 0;
-        return -1;
-    }
-    return 0;
-}
-
 /*
- * This function should be called by the HAL ISR (SPIx_IRQHandler).
+ * This function should be called by the HAL ISR.
  * It handles the data pumping.
  */
 void spi_core_irq_handler(spi_port_t port) {
@@ -151,12 +121,10 @@ void spi_core_irq_handler(spi_port_t port) {
         return;
     }
 
-    SPI_TypeDef *SPIx = (SPI_TypeDef *)port->hal_handle;
-
     /* Handle RX (Data Received) */
-    if (SPIx->SR & SPI_SR_RXNE) {
+    if (spi_hal_rx_ready(port->hal_handle)) {
         /* Read data */
-        uint8_t rx_byte = *((volatile uint8_t *)&SPIx->DR);
+        uint8_t rx_byte = spi_hal_read_byte(port->hal_handle);
 
         if (port->rx_buf && (port->rx_count < port->transfer_len)) {
             port->rx_buf[port->rx_count] = rx_byte;
@@ -171,6 +139,7 @@ void spi_core_irq_handler(spi_port_t port) {
 
             port->busy = 0;
 
+            /* Signal completion to the caller */
             if (port->callback) {
                 port->callback(port->cb_arg);
             }
@@ -179,11 +148,11 @@ void spi_core_irq_handler(spi_port_t port) {
     }
 
     /* Handle TX (Transmit Buffer Empty) */
-    if (SPIx->SR & SPI_SR_TXE) {
+    if (spi_hal_tx_ready(port->hal_handle)) {
         if (port->tx_count < port->transfer_len) {
             /* Send next byte */
             uint8_t tx_byte = (port->tx_buf != NULL) ? port->tx_buf[port->tx_count] : 0xFF;
-            *((volatile uint8_t *)&SPIx->DR) = tx_byte;
+            spi_hal_write_byte(port->hal_handle, tx_byte);
             port->tx_count++;
         } else {
             /* All data sent, disable TX interrupt to stop firing */
