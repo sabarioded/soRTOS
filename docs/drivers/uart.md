@@ -19,8 +19,6 @@ The UART (Universal Asynchronous Receiver/Transmitter) driver provides serial co
 - Buffered transmit and receive
 - Interrupt-driven operation
 - Configurable UART parameters
-- Flow control support
-- Memory-efficient context management
 
 ---
 
@@ -96,7 +94,7 @@ uart_destroy(uart);
 
 UART configuration includes:
 - Baud rate
-- Data bits (typically 8)
+- Data bits
 - Stop bits
 - Parity
 - Flow control
