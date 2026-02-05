@@ -5,7 +5,6 @@
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
@@ -70,8 +69,3 @@ if (state) {
 ```
 
 ---
-
-## Configuration
-
-GPIO configuration is typically done through the platform-specific HAL configuration structures. The driver itself does not require additional configuration beyond the parameters passed to `gpio_init()`.</content>
-- Support for multiple GPIO ports and pins

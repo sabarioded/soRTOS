@@ -19,12 +19,12 @@
 #include <stdio.h>
 #include <string.h>
 
-/* --- Simple simulated registers --- */
-I2C_TypeDef I2C1_Inst;
-I2C_TypeDef I2C2_Inst;
-I2C_TypeDef I2C3_Inst;
-SPI_TypeDef SPI1_Inst;
-SPI_TypeDef SPI2_Inst;
+/* --- Simple stub handles --- */
+I2C_Handle_t I2C1_Inst;
+I2C_Handle_t I2C2_Inst;
+I2C_Handle_t I2C3_Inst;
+SPI_Handle_t SPI1_Inst;
+SPI_Handle_t SPI2_Inst;
 
 /* --- GPIO --- */
 static uint8_t gpio_state[GPIO_PORT_MAX][16];
@@ -113,33 +113,6 @@ void uart_hal_write_byte(void *hal_handle, uint8_t byte) {
     fflush(stdout);
 }
 
-int uart_hal_start_tx_dma(void *hal_handle, const uint8_t *buf, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle;
-    if (!buf || len == 0) {
-        return -1;
-    }
-    for (size_t i = 0; i < len; i++) {
-        putchar((int)buf[i]);
-    }
-    fflush(stdout);
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return 0;
-}
-
-int uart_hal_start_rx_dma(void *hal_handle, uint8_t *buf, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle;
-    if (!buf || len == 0) {
-        return -1;
-    }
-    memset(buf, 0, len);
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return 0;
-}
-
 /* --- Systick --- */
 static uint32_t systick_reload;
 
@@ -154,40 +127,38 @@ void systick_hal_irq_handler(void) {
 
 /* --- I2C --- */
 void i2c_hal_init(void *hal_handle, void *config_ptr) {
-    I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
     (void)config_ptr;
     if (!I2Cx) {
         return;
     }
-    I2Cx->CR1 = 0;
-    I2Cx->CR2 = 0;
-    I2Cx->ISR = I2C_ISR_TXE;
-    I2Cx->ICR = 0;
+    I2Cx->last_tx = 0;
+    I2Cx->last_rx = 0;
+    I2Cx->has_rx = 0;
 }
 
 int i2c_hal_master_transmit(void *hal_handle, uint16_t addr, const uint8_t *data, size_t len) {
-    I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
     (void)addr;
     if (!I2Cx || !data) {
         return -1;
     }
     for (size_t i = 0; i < len; i++) {
-        I2Cx->TXDR = data[i];
+        I2Cx->last_tx = data[i];
     }
-    I2Cx->ISR |= I2C_ISR_STOPF;
+    I2Cx->has_rx = 0;
     return 0;
 }
 
 int i2c_hal_master_receive(void *hal_handle, uint16_t addr, uint8_t *data, size_t len) {
-    I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
     (void)addr;
     if (!I2Cx || !data) {
         return -1;
     }
     for (size_t i = 0; i < len; i++) {
-        data[i] = (uint8_t)(I2Cx->RXDR & 0xFFU);
+        data[i] = I2Cx->last_rx;
     }
-    I2Cx->ISR |= I2C_ISR_STOPF;
     return 0;
 }
 
@@ -201,44 +172,22 @@ void i2c_hal_enable_er_irq(void *hal_handle, uint8_t enable) {
     (void)enable;
 }
 
-int i2c_hal_master_transmit_dma(void *hal_handle, uint16_t addr, const uint8_t *data, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)addr;
-    if (i2c_hal_master_transmit(hal_handle, addr, data, len) != 0) {
-        return -1;
-    }
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return 0;
-}
-
-int i2c_hal_master_receive_dma(void *hal_handle, uint16_t addr, uint8_t *data, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)addr;
-    if (i2c_hal_master_receive(hal_handle, addr, data, len) != 0) {
-        return -1;
-    }
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return 0;
-}
-
 /* --- SPI --- */
 void spi_hal_init(void *hal_handle, void *config_ptr) {
-    SPI_TypeDef *SPIx = (SPI_TypeDef *)hal_handle;
+    SPI_Handle_t *SPIx = (SPI_Handle_t *)hal_handle;
     (void)config_ptr;
     if (!SPIx) {
         return;
     }
-    SPIx->SR = SPI_SR_TXE;
-    SPIx->DR = 0;
+    SPIx->last_tx = 0;
+    SPIx->last_rx = 0;
 }
 
 uint8_t spi_hal_transfer_byte(void *hal_handle, uint8_t byte) {
-    SPI_TypeDef *SPIx = (SPI_TypeDef *)hal_handle;
+    SPI_Handle_t *SPIx = (SPI_Handle_t *)hal_handle;
     if (SPIx) {
-        SPIx->DR = byte;
-        SPIx->SR |= SPI_SR_RXNE;
+        SPIx->last_tx = byte;
+        SPIx->last_rx = byte;
     }
     return byte;
 }
@@ -251,22 +200,6 @@ void spi_hal_enable_rx_irq(void *hal_handle, uint8_t enable) {
 void spi_hal_enable_tx_irq(void *hal_handle, uint8_t enable) {
     (void)hal_handle;
     (void)enable;
-}
-
-int spi_hal_transfer_dma(void *hal_handle, const uint8_t *tx_data, uint8_t *rx_data, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle;
-    if (len == 0) {
-        return -1;
-    }
-    if (rx_data) {
-        for (size_t i = 0; i < len; i++) {
-            rx_data[i] = tx_data ? tx_data[i] : 0xFF;
-        }
-    }
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return 0;
 }
 
 /* --- ADC --- */

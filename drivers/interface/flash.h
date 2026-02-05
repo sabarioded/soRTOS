@@ -31,7 +31,7 @@ int flash_erase_page(uint32_t page_addr);
  * 
  * @param addr The address to start writing to.
  * @param data Pointer to the data buffer.
- * @param len Number of bytes to write (must be multiple of 8 for STM32L4).
+ * @param len Number of bytes to write.
  * @return int 0 on success, -1 on error.
  */
 int flash_program(uint32_t addr, const void *data, size_t len);

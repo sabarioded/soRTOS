@@ -6,9 +6,7 @@
 typedef enum {
     I2C_STATE_IDLE,
     I2C_STATE_TX,
-    I2C_STATE_RX,
-    I2C_STATE_TX_DMA,
-    I2C_STATE_RX_DMA
+    I2C_STATE_RX
 } i2c_state_t;
 
 struct i2c_context {
@@ -158,66 +156,6 @@ int i2c_master_receive_async(i2c_port_t port, uint16_t addr, uint8_t *data,
 }
 
 static void i2c_complete(i2c_port_t port);
-
-static void i2c_dma_done(void *arg) {
-    i2c_port_t port = (i2c_port_t)arg;
-    if (!port) {
-        return;
-    }
-    i2c_complete(port);
-}
-
-int i2c_master_transmit_dma(i2c_port_t port, uint16_t addr,
-                            const uint8_t *data, size_t len,
-                            i2c_callback_t callback, void *arg) {
-    if (!port || !port->hal_handle || !data || len == 0 || len > 255) {
-        return -1;
-    }
-    if (port->state != I2C_STATE_IDLE) {
-        return -1;
-    }
-
-    port->addr = addr;
-    port->tx_buf = data;
-    port->rx_buf = NULL;
-    port->transfer_len = len;
-    port->transfer_idx = 0;
-    port->callback = callback;
-    port->cb_arg = arg;
-    port->state = I2C_STATE_TX_DMA;
-
-    if (i2c_hal_master_transmit_dma(port->hal_handle, addr, data, len, i2c_dma_done, port) != 0) {
-        port->state = I2C_STATE_IDLE;
-        return -1;
-    }
-    return 0;
-}
-
-int i2c_master_receive_dma(i2c_port_t port, uint16_t addr, uint8_t *data,
-                           size_t len, i2c_callback_t callback, void *arg) {
-    if (!port || !port->hal_handle || !data || len == 0 || len > 255) {
-        return -1;
-    }
-    if (port->state != I2C_STATE_IDLE) {
-        return -1;
-    }
-
-    port->addr = addr;
-    port->tx_buf = NULL;
-    port->rx_buf = data;
-    port->transfer_len = len;
-    port->transfer_idx = 0;
-    port->callback = callback;
-    port->cb_arg = arg;
-    port->state = I2C_STATE_RX_DMA;
-
-    if (i2c_hal_master_receive_dma(port->hal_handle, addr, data, len, i2c_dma_done, port) != 0) {
-        port->state = I2C_STATE_IDLE;
-        return -1;
-    }
-    return 0;
-}
-
 static void i2c_complete(i2c_port_t port) {
     i2c_hal_enable_ev_irq(port->hal_handle, 0);
     i2c_hal_enable_er_irq(port->hal_handle, 0);
@@ -236,10 +174,6 @@ void i2c_core_ev_irq_handler(i2c_port_t port) {
     if (!port || port->state == I2C_STATE_IDLE) {
         return;
     }
-    if (port->state == I2C_STATE_TX_DMA || port->state == I2C_STATE_RX_DMA) {
-        return;
-    }
-
     I2C_TypeDef *I2Cx = (I2C_TypeDef *)port->hal_handle;
     uint32_t isr = I2Cx->ISR;
 
@@ -275,10 +209,6 @@ void i2c_core_er_irq_handler(i2c_port_t port) {
     if (!port) {
         return;
     }
-    if (port->state == I2C_STATE_TX_DMA || port->state == I2C_STATE_RX_DMA) {
-        return;
-    }
-
     I2C_TypeDef *I2Cx = (I2C_TypeDef *)port->hal_handle;
 
     /* Clear Errors for now */

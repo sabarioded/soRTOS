@@ -1,4 +1,5 @@
 #include "mock_drivers.h"
+#include "exti_hal.h"
 
 /* Watchdog */
 int mock_watchdog_init_return = 0;
@@ -75,27 +76,6 @@ void uart_hal_write_byte(void *hal_handle, uint8_t byte) {
     mock_uart_last_byte_written = byte;
 }
 
-int uart_hal_start_tx_dma(void *hal_handle, const uint8_t *buf, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle; (void)buf; (void)len;
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return 0;
-}
-
-int uart_hal_start_rx_dma(void *hal_handle, uint8_t *buf, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle;
-    if (buf) {
-        for (size_t i = 0; i < len; i++) {
-            buf[i] = 0;
-        }
-    }
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return 0;
-}
-
 /* I2C */
 int mock_i2c_init_called = 0;
 int mock_i2c_transmit_return = 0;
@@ -126,22 +106,6 @@ void i2c_hal_enable_er_irq(void *hal_handle, uint8_t enable) {
     (void)enable;
 }
 
-int i2c_hal_master_transmit_dma(void *hal_handle, uint16_t addr, const uint8_t *data, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle; (void)addr; (void)data; (void)len;
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return mock_i2c_transmit_return;
-}
-
-int i2c_hal_master_receive_dma(void *hal_handle, uint16_t addr, uint8_t *data, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle; (void)addr; (void)data; (void)len;
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return mock_i2c_receive_return;
-}
-
 /* SPI */
 int mock_spi_init_called = 0;
 uint8_t mock_spi_transfer_return = 0;
@@ -164,14 +128,6 @@ void spi_hal_enable_rx_irq(void *hal_handle, uint8_t enable) {
 void spi_hal_enable_tx_irq(void *hal_handle, uint8_t enable) {
     (void)hal_handle;
     (void)enable;
-}
-
-int spi_hal_transfer_dma(void *hal_handle, const uint8_t *tx_data, uint8_t *rx_data, size_t len, void (*done_cb)(void *), void *cb_arg) {
-    (void)hal_handle; (void)tx_data; (void)rx_data; (void)len;
-    if (done_cb) {
-        done_cb(cb_arg);
-    }
-    return 0;
 }
 
 /* ADC */
@@ -204,7 +160,7 @@ int mock_exti_configure_called = 0;
 int mock_exti_enable_called = 0;
 int mock_exti_disable_called = 0;
 
-void exti_hal_configure(uint8_t pin, uint8_t port, int trigger) { (void)pin; (void)port; (void)trigger; mock_exti_configure_called++; }
+void exti_hal_configure(uint8_t pin, uint8_t port, exti_trigger_t trigger) { (void)pin; (void)port; (void)trigger; mock_exti_configure_called++; }
 void exti_hal_enable(uint8_t pin) { (void)pin; mock_exti_enable_called++; }
 void exti_hal_disable(uint8_t pin) { (void)pin; mock_exti_disable_called++; }
 

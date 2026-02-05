@@ -34,11 +34,21 @@ static inline int pwm_hal_init(void *hal_handle, uint8_t channel, uint32_t freq_
         
         /* Configure GPIOs for TIM2 */
         /* PA0=CH1, PA1=CH2, PA2=CH3, PA3=CH4 (AF1) */
-        if (channel == 1) gpio_init(GPIO_PORT_A, 0, GPIO_MODE_AF, GPIO_PULL_NONE, 1);
-        else if (channel == 2) gpio_init(GPIO_PORT_A, 1, GPIO_MODE_AF, GPIO_PULL_NONE, 1);
-        else if (channel == 3) gpio_init(GPIO_PORT_A, 2, GPIO_MODE_AF, GPIO_PULL_NONE, 1);
-        else if (channel == 4) gpio_init(GPIO_PORT_A, 3, GPIO_MODE_AF, GPIO_PULL_NONE, 1);
-        else return -1;
+        if (channel == 1) { 
+            gpio_init(GPIO_PORT_A, 0, GPIO_MODE_AF, GPIO_PULL_NONE, 1);
+        }
+        else if (channel == 2) {
+            gpio_init(GPIO_PORT_A, 1, GPIO_MODE_AF, GPIO_PULL_NONE, 1);
+        }
+        else if (channel == 3) {
+            gpio_init(GPIO_PORT_A, 2, GPIO_MODE_AF, GPIO_PULL_NONE, 1);
+        }
+        else if (channel == 4) {
+            gpio_init(GPIO_PORT_A, 3, GPIO_MODE_AF, GPIO_PULL_NONE, 1);
+        }
+        else {
+            return -1;
+        }
     } else {
         return -1; /* Only TIM2 supported in this HAL for now */
     }

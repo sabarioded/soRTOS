@@ -5,21 +5,12 @@
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
 ## Overview
 
 The Button driver provides debounced button input functionality for user interface buttons. It handles contact bounce and provides stable press detection with event-based notifications.
-
-### Key Features
-
-- Hardware button state reading
-- Software debouncing
-- Press event detection
-- Hold state monitoring
-- Periodic polling interface
 
 ---
 
@@ -69,8 +60,3 @@ void button_task(void) {
 ```
 
 ---
-
-## Configuration
-
-The button driver uses predefined hardware configuration. Debouncing parameters and timing are typically configured through compile-time constants in the HAL layer.</content>
-- Periodic polling interface

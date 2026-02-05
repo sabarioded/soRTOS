@@ -13,11 +13,6 @@ static void setUp_local(void) {
 static void tearDown_local(void) {
 }
 
-static void i2c_dma_done(void *arg) {
-    int *counter = (int *)arg;
-    (*counter)++;
-}
-
 void test_i2c_create_should_InitHal(void) {
     I2C_TypeDef regs;
     void* hal_handle = &regs;
@@ -60,28 +55,6 @@ void test_i2c_master_receive_should_CallHal(void) {
     TEST_ASSERT_EQUAL(0, res);
 }
 
-void test_i2c_dma_should_InvokeCallback(void) {
-    I2C_TypeDef regs;
-    void *hal_handle = &regs;
-    void *config = (void*)0x3000;
-    size_t ctx_size = i2c_get_context_size();
-    uint8_t ctx_mem[ctx_size];
-    i2c_port_t port = i2c_init(ctx_mem, hal_handle, config);
-    uint8_t data[] = {0x01, 0x02, 0x03};
-    uint8_t buf[3];
-    int tx_done = 0;
-    int rx_done = 0;
-
-    mock_i2c_transmit_return = 0;
-    mock_i2c_receive_return = 0;
-
-    TEST_ASSERT_EQUAL(0, i2c_master_transmit_dma(port, 0x50, data, sizeof(data), i2c_dma_done, &tx_done));
-    TEST_ASSERT_EQUAL(1, tx_done);
-
-    TEST_ASSERT_EQUAL(0, i2c_master_receive_dma(port, 0x50, buf, sizeof(buf), i2c_dma_done, &rx_done));
-    TEST_ASSERT_EQUAL(1, rx_done);
-}
-
 void run_i2c_tests(void) {
     printf("\n=== Starting I2C Tests ===\n");
 
@@ -91,7 +64,5 @@ void run_i2c_tests(void) {
     RUN_TEST(test_i2c_create_should_InitHal);
     RUN_TEST(test_i2c_master_transmit_should_CallHal);
     RUN_TEST(test_i2c_master_receive_should_CallHal);
-    RUN_TEST(test_i2c_dma_should_InvokeCallback);
-
     printf("=== I2C Tests Complete ===\n");
 }

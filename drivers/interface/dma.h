@@ -17,7 +17,7 @@ typedef struct dma_context* dma_channel_t;
  * @brief Create and initialize a DMA channel.
  * Allocates memory for the DMA context.
  * 
- * @param hal_handle Pointer to the low-level hardware handle (e.g., DMA1_Channel1).
+ * @param hal_handle Pointer to the low-level hardware handle.
  * @param config Pointer to the configuration structure (defined in dma_hal.h).
  * @return dma_channel_t Handle to the initialized DMA channel, or NULL on failure.
  */

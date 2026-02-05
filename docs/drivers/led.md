@@ -5,20 +5,12 @@
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
 ## Overview
 
 The LED driver provides a simple interface for controlling onboard or external LEDs. It supports basic on/off/toggle operations for status indication and user feedback.
-
-### Key Features
-
-- LED initialization
-- On/off control
-- Toggle functionality
-- Simple synchronous operation
 
 ---
 
@@ -73,8 +65,3 @@ void indicate_error(void) {
 ```
 
 ---
-
-## Configuration
-
-The LED driver uses predefined hardware configuration for the specific board or platform. The pin assignment and GPIO configuration are handled internally.</content>
-- Toggle functionality

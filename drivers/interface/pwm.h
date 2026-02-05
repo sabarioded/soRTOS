@@ -16,8 +16,8 @@ typedef struct pwm_context* pwm_port_t;
 /**
  * @brief Create and initialize a PWM channel.
  * 
- * @param hal_handle Pointer to the hardware timer (e.g., TIM2).
- * @param channel Channel number (1-4).
+ * @param hal_handle Pointer to the hardware timer.
+ * @param channel Channel number.
  * @param freq_hz Desired frequency in Hz.
  * @param duty_percent Initial duty cycle (0-100).
  * @return pwm_port_t Handle to the PWM port, or NULL on failure.

@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "rtc.h"
+#include "rtc_hal.h"
 #include "mock_drivers.h"
 #include "test_common.h"
 #include <stdio.h>

@@ -4,6 +4,12 @@
 #include "device_registers.h"
 #include "exti.h"
 
+enum {
+    EXTI_TRIGGER_RISING = 0,
+    EXTI_TRIGGER_FALLING,
+    EXTI_TRIGGER_BOTH
+};
+
 /* SYSCFG Clock Enable */
 #define RCC_APB2ENR_SYSCFGEN    (1U << 0)
 

@@ -5,6 +5,12 @@
 #include "gpio.h"
 #include "gpio_hal.h"
 #include "dac.h"
+#include <stdint.h>
+
+enum {
+    DAC_CHANNEL_1 = 1,
+    DAC_CHANNEL_2 = 2
+};
 
 /* RCC Definitions */
 #define RCC_APB1ENR1_DAC1EN     (1U << 29)

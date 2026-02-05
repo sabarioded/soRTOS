@@ -6,20 +6,12 @@
 - [Architecture](#architecture)
 - [Protocol](#protocol)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
 ## Overview
 
 The ADC (Analog-to-Digital Converter) driver provides an interface for reading analog voltage levels from microcontroller pins. It supports single-channel conversions with configurable resolution and sampling parameters.
-
-### Key Features
-
-- Single-channel analog-to-digital conversion
-- Configurable ADC parameters through HAL configuration
-- Support for multiple ADC channels
-- Memory-efficient context management
 
 ---
 
@@ -82,12 +74,3 @@ adc_destroy(adc);
 ```
 
 ---
-
-## Configuration
-
-ADC configuration is handled through the HAL-specific configuration structure passed during initialization. This typically includes parameters such as:
-- ADC resolution
-- Sampling time
-- Reference voltage
-- Conversion mode</content>
-- Conversion mode

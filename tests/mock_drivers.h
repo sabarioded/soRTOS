@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "rtc.h"
+#include "rtc_hal.h"
 #include "dac.h"
 
 /* Watchdog Mocks */

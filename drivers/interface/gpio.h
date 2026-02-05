@@ -25,8 +25,8 @@ typedef uint8_t gpio_pull_t;
 /**
  * @brief Initialize a GPIO pin.
  * 
- * @param port The GPIO port (e.g., GPIO_PORT_A).
- * @param pin The pin number (0-15).
+ * @param port The GPIO port.
+ * @param pin The pin number.
  * @param mode The mode (Input, Output, AF, Analog).
  * @param pull The pull-up/down configuration.
  * @param af The alternate function number (0-15), used only if mode is GPIO_MODE_AF.

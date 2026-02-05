@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "dac.h"
+#include "dac_hal.h"
 #include "mock_drivers.h"
 #include "test_common.h"
 #include <stdio.h>

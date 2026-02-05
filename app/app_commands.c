@@ -9,6 +9,13 @@
 #include "button.h"
 #include "queue.h"
 
+#define TEST_ASSERT(cond, msg) do { \
+    if (!(cond)) { \
+        cli_printf("[FAIL] %s\r\n", msg); \
+        return -1; \
+    } \
+} while(0)
+
 /* Forward declarations */
 static int cmd_heap_stats_handler(int argc, char **argv);
 static int cmd_task_list_handler(int argc, char **argv);
@@ -43,13 +50,6 @@ static int verify_pattern(uint8_t *ptr, size_t size) {
     }
     return 0;
 }
-
-#define TEST_ASSERT(cond, msg) do { \
-    if (!(cond)) { \
-        cli_printf("[FAIL] %s\r\n", msg); \
-        return -1; \
-    } \
-} while(0)
 
 /* Command definitions */
 static const cli_command_t heap_stats_cmd = {

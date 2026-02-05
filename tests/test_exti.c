@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "exti.h"
+#include "exti_hal.h"
 #include "mock_drivers.h"
 #include "test_common.h"
 #include <stdio.h>

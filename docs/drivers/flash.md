@@ -6,20 +6,12 @@
 - [Architecture](#architecture)
 - [Protocol](#protocol)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
 ## Overview
 
 The Flash driver provides an interface for reading, writing, and erasing microcontroller flash memory. It handles the complexities of flash programming including unlock/lock operations and page-based erase.
-
-### Key Features
-
-- Flash memory unlock/lock protection
-- Page-based erase operations
-- Data programming with alignment requirements
-- Error handling for flash operations
 
 ---
 
@@ -84,11 +76,3 @@ flash_lock();
 ```
 
 ---
-
-## Configuration
-
-Flash operations require knowledge of:
-- Page size and alignment
-- Memory addresses
-- Programming word size
-- Sector/page boundaries</content>

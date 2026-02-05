@@ -7,30 +7,37 @@
 extern "C" {
 #endif
 
-typedef struct {
-    uint8_t hours;
-    uint8_t minutes;
-    uint8_t seconds;
-} rtc_time_t;
-
-typedef struct {
-    uint8_t day;
-    uint8_t month;
-    uint8_t year; /* 0-99 */
-    uint8_t weekday; /* 1=Mon, 7=Sun */
-} rtc_date_t;
+typedef struct rtc_time rtc_time_t;
+typedef struct rtc_date rtc_date_t;
 
 /**
  * @brief Initialize the RTC.
- * Uses LSI clock source.
  * @return 0 on success, -1 on error.
  */
 int rtc_init(void);
 
+/**
+ * @brief Read the current RTC time.
+ * @param time Pointer to a rtc_time_t structure to fill.
+ */
 void rtc_get_time(rtc_time_t *time);
+
+/**
+ * @brief Set the RTC time.
+ * @param time Pointer to a rtc_time_t structure containing the new time.
+ */
 void rtc_set_time(const rtc_time_t *time);
 
+/**
+ * @brief Read the current RTC date.
+ * @param date Pointer to a rtc_date_t structure to fill.
+ */
 void rtc_get_date(rtc_date_t *date);
+
+/**
+ * @brief Set the RTC date.
+ * @param date Pointer to a rtc_date_t structure containing the new date.
+ */
 void rtc_set_date(const rtc_date_t *date);
 
 #ifdef __cplusplus

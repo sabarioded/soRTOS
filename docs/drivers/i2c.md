@@ -6,20 +6,12 @@
 - [Architecture](#architecture)
 - [Protocol](#protocol)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
 ## Overview
 
 The I2C (Inter-Integrated Circuit) driver provides a master-mode interface for communicating with I2C slave devices. It supports data transmission and reception with configurable timing parameters.
-
-### Key Features
-
-- Master-mode I2C communication
-- 7-bit slave addressing
-- Transmit and receive operations
-- Configurable I2C parameters (speed, timing)
 
 ---
 
@@ -84,11 +76,3 @@ i2c_destroy(i2c);
 ```
 
 ---
-
-## Configuration
-
-I2C configuration includes:
-- Clock speed (standard/fast mode)
-- Timing parameters
-- Address mode (7-bit)
-- Pull-up configurations</content>

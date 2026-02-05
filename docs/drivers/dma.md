@@ -6,20 +6,12 @@
 - [Architecture](#architecture)
 - [Protocol](#protocol)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
 ## Overview
 
 The DMA (Direct Memory Access) driver provides an interface for high-speed data transfers between memory and peripherals without CPU intervention. It supports configurable transfer parameters and channel management.
-
-### Key Features
-
-- Memory-to-memory and memory-to-peripheral transfers
-- Configurable transfer parameters
-- Non-blocking operation
-- Channel-based architecture
 
 ---
 
@@ -94,15 +86,3 @@ dma_destroy(dma);
 ```
 
 ---
-
-## Configuration
-
-DMA configuration includes parameters such as:
-- Transfer direction
-- Data size
-- Increment modes
-- Priority level
-- Interrupt settings
-
-These are defined in the HAL-specific configuration structure.</content>
-- Interrupt settings

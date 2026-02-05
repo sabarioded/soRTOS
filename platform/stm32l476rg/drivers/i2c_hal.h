@@ -201,28 +201,4 @@ static inline void i2c_hal_enable_er_irq(void *hal_handle, uint8_t enable) {
   }
 }
 
-static inline int i2c_hal_master_transmit_dma(void *hal_handle, uint16_t addr,
-                                              const uint8_t *data, size_t len,
-                                              void (*done_cb)(void *), void *cb_arg) {
-  (void)hal_handle;
-  (void)addr;
-  (void)data;
-  (void)len;
-  (void)done_cb;
-  (void)cb_arg;
-  return -1;
-}
-
-static inline int i2c_hal_master_receive_dma(void *hal_handle, uint16_t addr,
-                                             uint8_t *data, size_t len,
-                                             void (*done_cb)(void *), void *cb_arg) {
-  (void)hal_handle;
-  (void)addr;
-  (void)data;
-  (void)len;
-  (void)done_cb;
-  (void)cb_arg;
-  return -1;
-}
-
 #endif /* I2C_HAL_STM32_H */

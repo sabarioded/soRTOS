@@ -13,13 +13,6 @@
 
 The EXTI (External Interrupt) driver provides an interface for handling external interrupts from GPIO pins. It supports configurable trigger conditions and callback-based interrupt handling.
 
-### Key Features
-
-- Configurable trigger edges (rising, falling, both)
-- Callback-based interrupt handling
-- Pin-to-EXTI line mapping
-- Enable/disable interrupt control
-
 ---
 
 ## Architecture
@@ -42,6 +35,7 @@ The EXTI driver configures external interrupt lines and manages interrupt callba
 ### Button Interrupt
 ```c
 #include "exti.h"
+#include "exti_hal.h"
 
 // Callback function
 void button_callback(void *arg) {

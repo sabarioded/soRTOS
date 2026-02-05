@@ -5,7 +5,6 @@
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Usage Examples](#usage-examples)
-- [Configuration](#configuration)
 
 ---
 
@@ -40,6 +39,7 @@ The DAC driver directly interfaces with the microcontroller's DAC peripheral, pr
 ### Basic DAC Output
 ```c
 #include "dac.h"
+#include "dac_hal.h"
 
 // Initialize DAC channel 1
 if (dac_init(DAC_CHANNEL_1) == 0) {
@@ -49,8 +49,3 @@ if (dac_init(DAC_CHANNEL_1) == 0) {
 ```
 
 ---
-
-## Configuration
-
-DAC configuration is minimal and handled through the HAL layer. The driver assumes standard 12-bit operation with the microcontroller's reference voltage.</content>
-- 12-bit resolution

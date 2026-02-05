@@ -13,24 +13,11 @@
 
 The RTC (Real-Time Clock) driver provides time and date keeping functionality using the microcontroller's RTC peripheral. It supports getting and setting time and date with automatic calendar calculations.
 
-### Key Features
-
-- Time keeping (hours, minutes, seconds)
-- Date tracking (day, month, year, weekday)
-- Battery-backed operation
-- Automatic calendar management
-
 ---
 
 ## Architecture
 
 The RTC driver interfaces with the hardware RTC peripheral, which maintains time independently of the main system clock and can operate during low-power modes.
-
-**System View:**
-
-1.  **RTC Driver:** Interface for setting/getting human-readable Time & Date.
-2.  **RTC Hardware:** A low-power peripheral with a 32.768kHz crystal.
-3.  **Backup Domain:** Powered by a coin cell (VBAT), ensuring timekeeping continues even when the main MCU power (VDD) is off.
 
 ---
 
@@ -41,6 +28,7 @@ The RTC driver interfaces with the hardware RTC peripheral, which maintains time
 ### Setting and Reading Time
 ```c
 #include "rtc.h"
+#include "rtc_hal.h"
 
 // Initialize RTC
 if (rtc_init() == 0) {

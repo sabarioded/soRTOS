@@ -17,7 +17,7 @@ typedef struct adc_context* adc_port_t;
  * @brief Create and initialize an ADC port.
  * Allocates memory for the ADC context.
  * 
- * @param hal_handle Pointer to the low-level hardware handle (e.g., ADC1).
+ * @param hal_handle Pointer to the low-level hardware handle.
  * @param config Pointer to the configuration structure (defined in adc_hal.h).
  * @return adc_port_t Handle to the initialized ADC port, or NULL on failure.
  */
@@ -42,7 +42,7 @@ void adc_destroy(adc_port_t port);
 /**
  * @brief Read a single conversion from a specific channel.
  * @param port Handle to the ADC port.
- * @param channel The ADC channel number (0-18).
+ * @param channel The ADC channel number.
  * @param value Pointer to store the result.
  * @return int 0 on success, -1 on error (timeout or invalid param).
  */
