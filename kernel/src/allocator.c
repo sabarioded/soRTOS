@@ -279,6 +279,8 @@ void allocator_init(uint8_t* pool, size_t size) {
     uintptr_t raw_addr = (uintptr_t)pool;
     uintptr_t aligned_addr = ALIGN(raw_addr);
     size -= (aligned_addr - raw_addr);
+    /* Ensure heap size is aligned down to the required boundary */
+    size &= ~(ALIGN_SIZE - 1);
     
     if (size < BLOCK_MIN_SIZE) {
         platform_panic();  
@@ -591,8 +593,8 @@ int allocator_check_integrity(void) {
     
     size_t list_free_blocks = 0;
 
-    for (int fl = 0; fl < FL_INDEX_MAX; fl++) {
-        for (int sl = 0; sl < SL_INDEX_COUNT; sl++) {
+    for (uint32_t fl = 0; fl < FL_INDEX_MAX; fl++) {
+        for (uint32_t sl = 0; sl < SL_INDEX_COUNT; sl++) {
             block_header_t *block = control.blocks[fl][sl];
             
             if (block) {
