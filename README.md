@@ -98,48 +98,7 @@ This repo is in a demo-ready state: core kernel features are implemented, driver
 
 ## Architecture
 
-```mermaid
-graph TD
-    subgraph App["Application Layer"]
-        AppMain["app/src/main.c"]
-        AppAPI["app/interface"]
-        AppTasks["App Tasks"]
-    end
-
-    subgraph Kernel["Kernel Layer"]
-        Scheduler["Scheduler"]
-        Allocator["Allocator (TLSF)"]
-        IPC["IPC (Mutex/Sem/Queue/EG)"]
-        Services["Timers / Logger / CLI"]
-    end
-
-    subgraph Drivers["Driver Layer (Platform-Agnostic)"]
-        DIf["drivers/interface"]
-        DCore["drivers/src"]
-    end
-
-    subgraph HAL["HAL / Platform Drivers"]
-        HalIf["platform/*/drivers/*_hal.h"]
-    end
-
-    subgraph Platform["Platform + Arch"]
-        Startup["Startup / Linker"]
-        ArchOps["arch/*"]
-        Clock["platform/*/system_clock"]
-    end
-
-    subgraph HW["Hardware"]
-        Periph["MCU Peripherals"]
-    end
-
-    AppMain --> Kernel
-    AppTasks --> Kernel
-    Kernel --> Drivers
-    Drivers --> HAL
-    HAL --> Periph
-    Kernel --> ArchOps
-    Startup --> ArchOps
-```
+![Architecture diagram](docs/images/architecture.svg)
 
 **Layer Separation:**
 *   **Application:** User code and tasks
