@@ -346,24 +346,27 @@ Run unit tests on the native host platform:
 make test
 ```
 
-### Demo (Native)
+### Demo
 
-Example CLI session (native build):
+Example CLI session:
 
 ```
-$ make
-$ ./build/native/soRTOS.elf
-
 soRTOS> help
 Available commands:
   help       List commands
+  log        Manage system logs
+  heap       Show heap statistics (dynamic mode only)
   tasks      List all tasks
   uptime     How long the system is up
-  heap       Show heap statistics (dynamic mode only)
-  log        Manage system logs
+  kill       kill <task_id> : kill a task
+  reboot     reboot the system
+  blink      Start the blink task
+  logger     Start the button logger task
+  top        Show CPU usage per task
+  heaptest   Stress test heap: heaptest <basic|frag|stress> [size]
 
 soRTOS> uptime
-Uptime: 0 Days, 0 Hours, 0 Minutes, 3 Seconds
+Uptime: 0 Days, 0 Hours, 0 Minutes, 10 Seconds
 ```
 
 ### Writing Your First Application
