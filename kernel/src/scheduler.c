@@ -229,7 +229,7 @@ static void _insert_into_sleep_list(scheduler_cpu_t *ctx, task_t *task) {
     }
 }
 
-static void inline _wake_sleeping_task(scheduler_cpu_t *ctx, task_t *task) {
+static inline void _wake_sleeping_task(scheduler_cpu_t *ctx, task_t *task) {
      task->state = TASK_READY;
      /* Insert into heap */
      uint64_t min_v = _get_min_vruntime(ctx);
