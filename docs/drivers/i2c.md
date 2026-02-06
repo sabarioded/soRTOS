@@ -11,7 +11,7 @@
 
 ## Overview
 
-The I2C (Inter-Integrated Circuit) driver provides a master-mode interface for communicating with I2C slave devices. Timing parameters and maximum transfer length are configured by the platform HAL.
+The I2C (Inter-Integrated Circuit) driver provides a master-mode interface for communicating with I2C slave devices. Timing parameters and maximum transfer length are configured by the platform HAL (TIMINGR is derived from the platform clock and target speed).
 
 ---
 

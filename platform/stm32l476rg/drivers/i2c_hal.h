@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+size_t platform_get_cpu_freq(void);
+
 /* RCC Definitions */
 #define RCC_APB1ENR1_I2C1EN (1U << 21)
 #define RCC_APB1ENR1_I2C2EN (1U << 22)
@@ -52,6 +54,76 @@ typedef struct {
   I2C_Speed_t Speed;
 } I2C_Config_t;
 
+static inline uint32_t i2c_hal_ceil_div_u64(uint64_t num, uint32_t den) {
+  return (uint32_t)((num + (uint64_t)den - 1ULL) / den);
+}
+
+static inline uint32_t i2c_hal_compute_timing(uint32_t pclk_hz,
+                                              I2C_Speed_t speed) {
+  /* I2C spec minima (ns). This is a conservative, spec-based setup. */
+  uint32_t t_scl_min_ns = (speed == I2C_SPEED_STANDARD) ? 10000U : 2500U;
+  uint32_t t_low_min_ns = (speed == I2C_SPEED_STANDARD) ? 4700U : 1300U;
+  uint32_t t_high_min_ns = (speed == I2C_SPEED_STANDARD) ? 4000U : 600U;
+
+  /* Data setup/delay (ns). Keep simple defaults. */
+  uint32_t scldel_ns = (speed == I2C_SPEED_STANDARD) ? 250U : 100U;
+  uint32_t sdadel_ns = 0U;
+
+  /* Choose high time to meet overall period and min high time. */
+  uint32_t t_low_ns = t_low_min_ns;
+  uint32_t t_high_ns =
+      (t_scl_min_ns > t_low_ns) ? (t_scl_min_ns - t_low_ns) : t_high_min_ns;
+  if (t_high_ns < t_high_min_ns) {
+    t_high_ns = t_high_min_ns;
+  }
+
+  if (pclk_hz == 0U) {
+    return (speed == I2C_SPEED_STANDARD) ? 0x10909CECU : 0x00702991U;
+  }
+
+  uint32_t t_low_cycles =
+      i2c_hal_ceil_div_u64((uint64_t)t_low_ns * pclk_hz, 1000000000ULL);
+  uint32_t t_high_cycles =
+      i2c_hal_ceil_div_u64((uint64_t)t_high_ns * pclk_hz, 1000000000ULL);
+  uint32_t t_scldel_cycles =
+      i2c_hal_ceil_div_u64((uint64_t)scldel_ns * pclk_hz, 1000000000ULL);
+  uint32_t t_sdadel_cycles =
+      i2c_hal_ceil_div_u64((uint64_t)sdadel_ns * pclk_hz, 1000000000ULL);
+
+  for (uint32_t presc = 0; presc <= 15; presc++) {
+    uint32_t presc_div = presc + 1U;
+    uint32_t scll = i2c_hal_ceil_div_u64(t_low_cycles, presc_div);
+    uint32_t sclh = i2c_hal_ceil_div_u64(t_high_cycles, presc_div);
+    uint32_t scldel = 0U;
+    uint32_t sdadel = 0U;
+
+    if (scll == 0U || sclh == 0U) {
+      continue;
+    }
+    scll -= 1U;
+    sclh -= 1U;
+
+    if (t_scldel_cycles > 0U) {
+      scldel = i2c_hal_ceil_div_u64(t_scldel_cycles, presc_div);
+      if (scldel == 0U) {
+        scldel = 1U;
+      }
+      scldel -= 1U;
+    }
+    if (t_sdadel_cycles > 0U) {
+      sdadel = i2c_hal_ceil_div_u64(t_sdadel_cycles, presc_div);
+    }
+
+    if (scll <= 255U && sclh <= 255U && scldel <= 15U && sdadel <= 15U) {
+      return (presc << 28) | (scldel << 20) | (sdadel << 16) | (sclh << 8) |
+             (scll);
+    }
+  }
+
+  /* Fallback to known-good 80 MHz defaults. */
+  return (speed == I2C_SPEED_STANDARD) ? 0x10909CECU : 0x00702991U;
+}
+
 /**
  * @brief Enable clocks and configure pins based on the I2C instance.
  */
@@ -86,16 +158,9 @@ static inline void i2c_hal_init(void *hal_handle, void *config_ptr) {
   I2Cx->CR1 &= ~I2C_CR1_PE;
 
   /* Timing Configuration */
-  /* Note: TIMINGR calculation is complex and depends on source clock.
-     For 80MHz SysClk (APB1), here are approximate values.
-  */
-  if (cfg->Speed == I2C_SPEED_STANDARD) {
-    /* 100kHz @ 80MHz: Example value */
-    I2Cx->TIMINGR = 0x10909CEC;
-  } else {
-    /* 400kHz @ 80MHz: Example value */
-    I2Cx->TIMINGR = 0x00702991;
-  }
+  /* Auto-calc TIMINGR from PCLK1 (assumed equal to SYSCLK on this board). */
+  uint32_t pclk_hz = (uint32_t)platform_get_cpu_freq();
+  I2Cx->TIMINGR = i2c_hal_compute_timing(pclk_hz, cfg->Speed);
 
   /* Enable I2C */
   I2Cx->CR1 |= I2C_CR1_PE;
