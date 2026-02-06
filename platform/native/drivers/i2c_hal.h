@@ -55,4 +55,14 @@ int i2c_hal_master_transmit(void *hal_handle, uint16_t addr, const uint8_t *data
 int i2c_hal_master_receive(void *hal_handle, uint16_t addr, uint8_t *data, size_t len);
 void i2c_hal_enable_ev_irq(void *hal_handle, uint8_t enable);
 void i2c_hal_enable_er_irq(void *hal_handle, uint8_t enable);
+int i2c_hal_start_master_transfer(void *hal_handle, uint16_t addr, size_t len, uint8_t read);
+uint8_t i2c_hal_tx_ready(void *hal_handle);
+uint8_t i2c_hal_rx_ready(void *hal_handle);
+void i2c_hal_write_tx_byte(void *hal_handle, uint8_t byte);
+uint8_t i2c_hal_read_rx_byte(void *hal_handle);
+uint8_t i2c_hal_stop_detected(void *hal_handle);
+void i2c_hal_clear_stop(void *hal_handle);
+uint8_t i2c_hal_nack_detected(void *hal_handle);
+void i2c_hal_clear_nack(void *hal_handle);
+void i2c_hal_clear_config(void *hal_handle);
 #endif /* I2C_HAL_NATIVE_H */

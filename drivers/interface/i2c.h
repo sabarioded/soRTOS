@@ -16,8 +16,15 @@ typedef struct i2c_context *i2c_port_t;
 /**
  * @brief I2C Callback function type.
  * @param arg User-provided argument.
+ * @param status Completion status (I2C_STATUS_OK or error code).
  */
-typedef void (*i2c_callback_t)(void *arg);
+typedef enum {
+    I2C_STATUS_OK = 0,
+    I2C_STATUS_ERR = -1,
+    I2C_STATUS_NACK = -2
+} i2c_status_t;
+
+typedef void (*i2c_callback_t)(void *arg, i2c_status_t status);
 
 /**
  * @brief Create and initialize an I2C port.
@@ -51,7 +58,8 @@ void i2c_destroy(i2c_port_t port);
  * @param port Handle to the I2C port.
  * @param addr 7-bit Slave Address.
  * @param data Pointer to the data buffer.
- * @param len Number of bytes to transmit (max 255).
+ * @param len Number of bytes to transmit.
+ *            Maximum length is platform-specific and enforced by the HAL.
  * @return int 0 on success, -1 on error.
  */
 int i2c_master_transmit(i2c_port_t port, 
@@ -65,7 +73,8 @@ int i2c_master_transmit(i2c_port_t port,
  * @param port Handle to the I2C port.
  * @param addr 7-bit Slave Address.
  * @param data Pointer to the buffer to store received data.
- * @param len Number of bytes to receive (max 255).
+ * @param len Number of bytes to receive.
+ *            Maximum length is platform-specific and enforced by the HAL.
  * @return int 0 on success, -1 on error.
  */
 int i2c_master_receive(i2c_port_t port, 
@@ -82,6 +91,7 @@ int i2c_master_receive(i2c_port_t port,
  * @param len Number of bytes to transmit.
  * @param callback Function to call when transfer completes.
  * @param arg User argument.
+ * @note Async support and maximum transfer length are platform-specific.
  * @return int 0 on success, -1 on error.
  */
 int i2c_master_transmit_async(i2c_port_t port, 
@@ -100,6 +110,7 @@ int i2c_master_transmit_async(i2c_port_t port,
  * @param len Number of bytes to receive.
  * @param callback Function to call when transfer completes.
  * @param arg User argument.
+ * @note Async support and maximum transfer length are platform-specific.
  * @return int 0 on success, -1 on error.
  */
 int i2c_master_receive_async(i2c_port_t port, 

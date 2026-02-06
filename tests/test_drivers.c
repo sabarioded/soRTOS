@@ -80,6 +80,10 @@ void uart_hal_write_byte(void *hal_handle, uint8_t byte) {
 int mock_i2c_init_called = 0;
 int mock_i2c_transmit_return = 0;
 int mock_i2c_receive_return = 0;
+int mock_i2c_start_called = 0;
+int mock_i2c_start_return = 0;
+int mock_i2c_stop_detected = 0;
+int mock_i2c_nack_detected = 0;
 
 void i2c_hal_init(void *hal_handle, void *config_ptr) {
     (void)hal_handle; (void)config_ptr;
@@ -104,6 +108,53 @@ void i2c_hal_enable_ev_irq(void *hal_handle, uint8_t enable) {
 void i2c_hal_enable_er_irq(void *hal_handle, uint8_t enable) {
     (void)hal_handle;
     (void)enable;
+}
+
+int i2c_hal_start_master_transfer(void *hal_handle, uint16_t addr, size_t len, uint8_t read) {
+    (void)hal_handle; (void)addr; (void)len; (void)read;
+    mock_i2c_start_called++;
+    return mock_i2c_start_return;
+}
+
+uint8_t i2c_hal_tx_ready(void *hal_handle) {
+    (void)hal_handle;
+    return 0;
+}
+
+uint8_t i2c_hal_rx_ready(void *hal_handle) {
+    (void)hal_handle;
+    return 0;
+}
+
+void i2c_hal_write_tx_byte(void *hal_handle, uint8_t byte) {
+    (void)hal_handle; (void)byte;
+}
+
+uint8_t i2c_hal_read_rx_byte(void *hal_handle) {
+    (void)hal_handle;
+    return 0;
+}
+
+uint8_t i2c_hal_stop_detected(void *hal_handle) {
+    (void)hal_handle;
+    return (uint8_t)mock_i2c_stop_detected;
+}
+
+void i2c_hal_clear_stop(void *hal_handle) {
+    (void)hal_handle;
+}
+
+uint8_t i2c_hal_nack_detected(void *hal_handle) {
+    (void)hal_handle;
+    return (uint8_t)mock_i2c_nack_detected;
+}
+
+void i2c_hal_clear_nack(void *hal_handle) {
+    (void)hal_handle;
+}
+
+void i2c_hal_clear_config(void *hal_handle) {
+    (void)hal_handle;
 }
 
 /* SPI */
@@ -152,7 +203,7 @@ int mock_dma_start_called = 0;
 int mock_dma_stop_called = 0;
 
 void dma_hal_init(void *hal_handle, void *config_ptr) { (void)hal_handle; (void)config_ptr; mock_dma_init_called++; }
-void dma_hal_start(void *hal_handle, uint32_t src, uint32_t dst, uint32_t length) { (void)hal_handle; (void)src; (void)dst; (void)length; mock_dma_start_called++; }
+void dma_hal_start(void *hal_handle, uintptr_t src, uintptr_t dst, size_t length) { (void)hal_handle; (void)src; (void)dst; (void)length; mock_dma_start_called++; }
 void dma_hal_stop(void *hal_handle) { (void)hal_handle; mock_dma_stop_called++; }
 
 /* EXTI */
@@ -240,6 +291,34 @@ void mock_drivers_reset(void) {
     mock_systick_init_return = 0; mock_systick_init_reload_arg = 0;
     mock_button_init_called = 0; mock_button_read_return = 0;
     mock_led_init_called = 0; mock_led_on_called = 0; mock_led_off_called = 0; mock_led_toggle_called = 0;
+
+    mock_uart_init_called = 0;
+    mock_uart_enable_rx_irq_arg = -1;
+    mock_uart_enable_tx_irq_arg = -1;
+    mock_uart_last_byte_written = 0;
+
+    mock_i2c_init_called = 0;
+    mock_i2c_transmit_return = 0;
+    mock_i2c_receive_return = 0;
+    mock_i2c_start_called = 0;
+    mock_i2c_start_return = 0;
+    mock_i2c_stop_detected = 0;
+    mock_i2c_nack_detected = 0;
+
+    mock_spi_init_called = 0;
+    mock_spi_transfer_return = 0;
+
+    mock_adc_init_return = 0;
+    mock_adc_read_return = 0;
+    mock_adc_read_val = 0;
+
+    mock_dma_init_called = 0;
+    mock_dma_start_called = 0;
+    mock_dma_stop_called = 0;
+
+    mock_exti_configure_called = 0;
+    mock_exti_enable_called = 0;
+    mock_exti_disable_called = 0;
     
     mock_dac_init_return = 0;
     mock_dac_last_write_value = 0;

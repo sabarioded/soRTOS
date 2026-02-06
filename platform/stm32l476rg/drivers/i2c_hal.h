@@ -4,6 +4,8 @@
 #include "device_registers.h"
 #include "gpio.h"
 #include "gpio_hal.h"
+#include <stdint.h>
+#include <stddef.h>
 
 /* RCC Definitions */
 #define RCC_APB1ENR1_I2C1EN (1U << 21)
@@ -103,7 +105,7 @@ static inline int i2c_hal_master_transmit(void *hal_handle, uint16_t addr,
                                           const uint8_t *data, size_t len) {
   I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
 
-  if (len > 255)
+  if (!I2Cx || !data || len == 0U || len > 255U)
     return -1; /* Simple driver supports max 255 bytes */
 
   /* Wait if busy */
@@ -146,7 +148,7 @@ static inline int i2c_hal_master_receive(void *hal_handle, uint16_t addr,
                                          uint8_t *data, size_t len) {
   I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
 
-  if (len > 255)
+  if (!I2Cx || !data || len == 0U || len > 255U)
     return -1;
 
   while (I2Cx->ISR & I2C_ISR_BUSY)
@@ -198,6 +200,92 @@ static inline void i2c_hal_enable_er_irq(void *hal_handle, uint8_t enable) {
     I2Cx->CR1 |= I2C_CR1_ERRIE;
   } else {
     I2Cx->CR1 &= ~I2C_CR1_ERRIE;
+  }
+}
+
+/**
+ * @brief Configure and start an async master transfer.
+ * @param hal_handle I2C peripheral base.
+ * @param addr 7-bit I2C address.
+ * @param len Number of bytes to transfer.
+ * @param read 0 for write, 1 for read.
+ * @return 0 on success, -1 on error.
+ */
+static inline int i2c_hal_start_master_transfer(void *hal_handle, uint16_t addr,
+                                                size_t len, uint8_t read) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+
+  if (!I2Cx || len == 0U || len > 255U)
+    return -1;
+
+  if (I2Cx->ISR & I2C_ISR_BUSY)
+    return -1;
+
+  uint32_t cr2 = (addr << 1);
+  cr2 |= ((uint32_t)len << I2C_CR2_NBYTES_Pos);
+  cr2 |= I2C_CR2_AUTOEND;
+  cr2 |= I2C_CR2_START;
+  if (read) {
+    cr2 |= I2C_CR2_RD_WRN;
+  }
+
+  I2Cx->CR2 = cr2;
+  return 0;
+}
+
+static inline uint8_t i2c_hal_tx_ready(void *hal_handle) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+  return (I2Cx != NULL) && ((I2Cx->ISR & I2C_ISR_TXE) != 0U);
+}
+
+static inline uint8_t i2c_hal_rx_ready(void *hal_handle) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+  return (I2Cx != NULL) && ((I2Cx->ISR & I2C_ISR_RXNE) != 0U);
+}
+
+static inline void i2c_hal_write_tx_byte(void *hal_handle, uint8_t byte) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+  if (I2Cx) {
+    I2Cx->TXDR = byte;
+  }
+}
+
+static inline uint8_t i2c_hal_read_rx_byte(void *hal_handle) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+  if (!I2Cx) {
+    return 0U;
+  }
+  return (uint8_t)I2Cx->RXDR;
+}
+
+static inline uint8_t i2c_hal_stop_detected(void *hal_handle) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+  return (I2Cx != NULL) && ((I2Cx->ISR & I2C_ISR_STOPF) != 0U);
+}
+
+static inline void i2c_hal_clear_stop(void *hal_handle) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+  if (I2Cx) {
+    I2Cx->ICR |= I2C_ICR_STOPCF;
+  }
+}
+
+static inline uint8_t i2c_hal_nack_detected(void *hal_handle) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+  return (I2Cx != NULL) && ((I2Cx->ISR & I2C_ISR_NACKF) != 0U);
+}
+
+static inline void i2c_hal_clear_nack(void *hal_handle) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+  if (I2Cx) {
+    I2Cx->ICR |= I2C_ICR_NACKCF;
+  }
+}
+
+static inline void i2c_hal_clear_config(void *hal_handle) {
+  I2C_TypeDef *I2Cx = (I2C_TypeDef *)hal_handle;
+  if (I2Cx) {
+    I2Cx->CR2 = 0U;
   }
 }
 

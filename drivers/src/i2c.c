@@ -11,17 +11,14 @@ typedef enum {
 
 struct i2c_context {
     void *hal_handle;
-
-    /* Async State */
     const uint8_t *tx_buf;
     uint8_t *rx_buf;
+    i2c_callback_t callback;
+    void *cb_arg;
     volatile size_t transfer_len;
     volatile size_t transfer_idx;
     volatile i2c_state_t state;
     uint16_t addr;
-
-    i2c_callback_t callback;
-    void *cb_arg;
 };
 
 size_t i2c_get_context_size(void) {
@@ -64,6 +61,9 @@ int i2c_master_transmit(i2c_port_t port, uint16_t addr, const uint8_t *data,
     if (!port || !port->hal_handle) {
         return -1;
     }
+    if (!data && len != 0U) {
+        return -1;
+    }
     if (port->state != I2C_STATE_IDLE) {
         return -1;
     }
@@ -76,6 +76,9 @@ int i2c_master_receive(i2c_port_t port, uint16_t addr, uint8_t *data,
     if (!port || !port->hal_handle) {
         return -1;
     }
+    if (!data && len != 0U) {
+        return -1;
+    }
     if (port->state != I2C_STATE_IDLE) {
         return -1;
     }
@@ -86,7 +89,10 @@ int i2c_master_receive(i2c_port_t port, uint16_t addr, uint8_t *data,
 int i2c_master_transmit_async(i2c_port_t port, uint16_t addr,
                               const uint8_t *data, size_t len,
                               i2c_callback_t callback, void *arg) {
-    if (!port || !port->hal_handle || len > 255) {
+    if (!port || !port->hal_handle) {
+        return -1;
+    }
+    if (!data || len == 0U) {
         return -1;
     }
     if (port->state != I2C_STATE_IDLE) {
@@ -102,15 +108,10 @@ int i2c_master_transmit_async(i2c_port_t port, uint16_t addr,
     port->cb_arg = arg;
     port->state = I2C_STATE_TX;
 
-    I2C_TypeDef *I2Cx = (I2C_TypeDef *)port->hal_handle;
-
-    /* Configure CR2: SADD, NBYTES, AUTOEND, Write(RD_WRN=0), START */
-    uint32_t cr2 = (addr << 1);
-    cr2 |= (len << I2C_CR2_NBYTES_Pos);
-    cr2 |= I2C_CR2_AUTOEND;
-    cr2 |= I2C_CR2_START;
-
-    I2Cx->CR2 = cr2;
+    if (i2c_hal_start_master_transfer(port->hal_handle, addr, len, 0) != 0) {
+        port->state = I2C_STATE_IDLE;
+        return -1;
+    }
 
     /* Enable Interrupts */
     i2c_hal_enable_ev_irq(port->hal_handle, 1);
@@ -121,7 +122,10 @@ int i2c_master_transmit_async(i2c_port_t port, uint16_t addr,
 
 int i2c_master_receive_async(i2c_port_t port, uint16_t addr, uint8_t *data,
                              size_t len, i2c_callback_t callback, void *arg) {
-    if (!port || !port->hal_handle || len > 255) {
+    if (!port || !port->hal_handle) {
+        return -1;
+    }
+    if (!data || len == 0U) {
         return -1;
     }
     if (port->state != I2C_STATE_IDLE) {
@@ -137,16 +141,10 @@ int i2c_master_receive_async(i2c_port_t port, uint16_t addr, uint8_t *data,
     port->cb_arg = arg;
     port->state = I2C_STATE_RX;
 
-    I2C_TypeDef *I2Cx = (I2C_TypeDef *)port->hal_handle;
-
-    /* Configure CR2: SADD, NBYTES, AUTOEND, Read(RD_WRN=1), START */
-    uint32_t cr2 = (addr << 1);
-    cr2 |= (len << I2C_CR2_NBYTES_Pos);
-    cr2 |= I2C_CR2_AUTOEND;
-    cr2 |= I2C_CR2_RD_WRN;
-    cr2 |= I2C_CR2_START;
-
-    I2Cx->CR2 = cr2;
+    if (i2c_hal_start_master_transfer(port->hal_handle, addr, len, 1) != 0) {
+        port->state = I2C_STATE_IDLE;
+        return -1;
+    }
 
     /* Enable Interrupts */
     i2c_hal_enable_ev_irq(port->hal_handle, 1);
@@ -155,18 +153,16 @@ int i2c_master_receive_async(i2c_port_t port, uint16_t addr, uint8_t *data,
     return 0;
 }
 
-static void i2c_complete(i2c_port_t port);
-static void i2c_complete(i2c_port_t port) {
+static void i2c_complete(i2c_port_t port, i2c_status_t status) {
     i2c_hal_enable_ev_irq(port->hal_handle, 0);
     i2c_hal_enable_er_irq(port->hal_handle, 0);
     port->state = I2C_STATE_IDLE;
 
-    /* Clear CR2 (Good practice) */
-    I2C_TypeDef *I2Cx = (I2C_TypeDef *)port->hal_handle;
-    I2Cx->CR2 = 0;
+    /* Clear transfer configuration in the peripheral */
+    i2c_hal_clear_config(port->hal_handle);
 
     if (port->callback) {
-        port->callback(port->cb_arg);
+        port->callback(port->cb_arg, status);
     }
 }
 
@@ -174,51 +170,55 @@ void i2c_core_ev_irq_handler(i2c_port_t port) {
     if (!port || port->state == I2C_STATE_IDLE) {
         return;
     }
-    I2C_TypeDef *I2Cx = (I2C_TypeDef *)port->hal_handle;
-    uint32_t isr = I2Cx->ISR;
+
+    /* Handle NACK early to abort the transfer */
+    if (i2c_hal_nack_detected(port->hal_handle)) {
+        i2c_hal_clear_nack(port->hal_handle);
+        i2c_complete(port, I2C_STATUS_NACK);
+        return;
+    }
 
     /* Handle TX */
     if (port->state == I2C_STATE_TX) {
-        if (isr & I2C_ISR_TXE) {
+        if (i2c_hal_tx_ready(port->hal_handle)) {
             if (port->transfer_idx < port->transfer_len) {
-                I2Cx->TXDR = port->tx_buf[port->transfer_idx++];
+                i2c_hal_write_tx_byte(port->hal_handle, port->tx_buf[port->transfer_idx++]);
             }
         }
     }
     /* Handle RX */
     else if (port->state == I2C_STATE_RX) {
-        if (isr & I2C_ISR_RXNE) {
+        if (i2c_hal_rx_ready(port->hal_handle)) {
             if (port->transfer_idx < port->transfer_len) {
-                port->rx_buf[port->transfer_idx++] = (uint8_t)I2Cx->RXDR;
+                port->rx_buf[port->transfer_idx++] = i2c_hal_read_rx_byte(port->hal_handle);
             } else {
                 /* Flush extra bytes? */
-                (void)I2Cx->RXDR;
+                (void)i2c_hal_read_rx_byte(port->hal_handle);
             }
         }
     }
 
     /* Handle STOPF (Stop Flag) - Indicates Transfer Complete due to AutoEnd */
-    if (isr & I2C_ISR_STOPF) {
+    if (i2c_hal_stop_detected(port->hal_handle)) {
         /* Clear STOPF */
-        I2Cx->ICR |= I2C_ICR_STOPCF;
-        i2c_complete(port);
+        i2c_hal_clear_stop(port->hal_handle);
+        i2c_complete(port, I2C_STATUS_OK);
     }
 }
 
 void i2c_core_er_irq_handler(i2c_port_t port) {
-    if (!port) {
+    if (!port || port->state == I2C_STATE_IDLE) {
         return;
     }
-    I2C_TypeDef *I2Cx = (I2C_TypeDef *)port->hal_handle;
 
     /* Clear Errors for now */
     /* Check NACK */
-    if (I2Cx->ISR & I2C_ISR_NACKF) {
-        I2Cx->ICR |= I2C_ICR_NACKCF;
+    if (i2c_hal_nack_detected(port->hal_handle)) {
+        i2c_hal_clear_nack(port->hal_handle);
+        i2c_complete(port, I2C_STATUS_NACK);
+        return;
     }
 
-    /* Abort / Complete with error state?
-       For now, we just reset state and callback.
-       Ideally, we pass an error code to callback (todo). */
-    i2c_complete(port);
+    /* Complete with a generic error status. */
+    i2c_complete(port, I2C_STATUS_ERR);
 }

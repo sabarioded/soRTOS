@@ -140,7 +140,7 @@ void i2c_hal_init(void *hal_handle, void *config_ptr) {
 int i2c_hal_master_transmit(void *hal_handle, uint16_t addr, const uint8_t *data, size_t len) {
     I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
     (void)addr;
-    if (!I2Cx || !data) {
+    if (!I2Cx || !data || len == 0U) {
         return -1;
     }
     for (size_t i = 0; i < len; i++) {
@@ -153,7 +153,7 @@ int i2c_hal_master_transmit(void *hal_handle, uint16_t addr, const uint8_t *data
 int i2c_hal_master_receive(void *hal_handle, uint16_t addr, uint8_t *data, size_t len) {
     I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
     (void)addr;
-    if (!I2Cx || !data) {
+    if (!I2Cx || !data || len == 0U) {
         return -1;
     }
     for (size_t i = 0; i < len; i++) {
@@ -170,6 +170,71 @@ void i2c_hal_enable_ev_irq(void *hal_handle, uint8_t enable) {
 void i2c_hal_enable_er_irq(void *hal_handle, uint8_t enable) {
     (void)hal_handle;
     (void)enable;
+}
+
+int i2c_hal_start_master_transfer(void *hal_handle, uint16_t addr, size_t len, uint8_t read) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    (void)addr;
+    (void)read;
+    if (!I2Cx || len == 0U) {
+        return -1;
+    }
+    /* Stub: mark STOPF immediately so a simulated IRQ can complete. */
+    I2Cx->ISR |= I2C_ISR_STOPF;
+    return 0;
+}
+
+uint8_t i2c_hal_tx_ready(void *hal_handle) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    return (I2Cx != NULL);
+}
+
+uint8_t i2c_hal_rx_ready(void *hal_handle) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    return (I2Cx != NULL);
+}
+
+void i2c_hal_write_tx_byte(void *hal_handle, uint8_t byte) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    if (I2Cx) {
+        I2Cx->last_tx = byte;
+    }
+}
+
+uint8_t i2c_hal_read_rx_byte(void *hal_handle) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    return I2Cx ? I2Cx->last_rx : 0U;
+}
+
+uint8_t i2c_hal_stop_detected(void *hal_handle) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    return (I2Cx != NULL) && (I2Cx->ISR & I2C_ISR_STOPF);
+}
+
+void i2c_hal_clear_stop(void *hal_handle) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    if (I2Cx) {
+        I2Cx->ISR &= ~I2C_ISR_STOPF;
+    }
+}
+
+uint8_t i2c_hal_nack_detected(void *hal_handle) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    return (I2Cx != NULL) && (I2Cx->ISR & I2C_ISR_NACKF);
+}
+
+void i2c_hal_clear_nack(void *hal_handle) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    if (I2Cx) {
+        I2Cx->ISR &= ~I2C_ISR_NACKF;
+    }
+}
+
+void i2c_hal_clear_config(void *hal_handle) {
+    I2C_Handle_t *I2Cx = (I2C_Handle_t *)hal_handle;
+    if (I2Cx) {
+        I2Cx->CR2 = 0U;
+    }
 }
 
 /* --- SPI --- */
@@ -344,7 +409,7 @@ void dma_hal_init(void *hal_handle, void *config_ptr) {
     (void)config_ptr;
 }
 
-void dma_hal_start(void *hal_handle, uint32_t src, uint32_t dst, uint32_t length) {
+void dma_hal_start(void *hal_handle, uintptr_t src, uintptr_t dst, size_t length) {
     (void)hal_handle;
     (void)src;
     (void)dst;
@@ -356,7 +421,7 @@ void dma_hal_stop(void *hal_handle) {
 }
 
 /* --- EXTI --- */
-void exti_hal_configure(uint8_t pin, uint8_t port, int trigger) {
+void exti_hal_configure(uint8_t pin, uint8_t port, exti_trigger_t trigger) {
     (void)pin;
     (void)port;
     (void)trigger;

@@ -36,6 +36,10 @@ extern uint8_t mock_uart_last_byte_written;
 extern int mock_i2c_init_called;
 extern int mock_i2c_transmit_return;
 extern int mock_i2c_receive_return;
+extern int mock_i2c_start_called;
+extern int mock_i2c_start_return;
+extern int mock_i2c_stop_detected;
+extern int mock_i2c_nack_detected;
 
 /* SPI Mocks */
 extern int mock_spi_init_called;
