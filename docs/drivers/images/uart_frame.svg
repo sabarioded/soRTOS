@@ -1,0 +1,25 @@
+<svg width="900" height="200" viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="UART frame with start, data bits, stop">
+  <style>
+    .sig { fill: none; stroke: #111; stroke-width: 2; }
+    .label { font: 14px monospace; fill: #111; }
+    .muted { font: 12px monospace; fill: #444; }
+  </style>
+  <rect x="0" y="0" width="900" height="200" fill="#fff"/>
+
+  <text class="label" x="20" y="80">TX/RX</text>
+
+  <!-- Idle high, start low, 8 data bits (LSB first), stop high -->
+  <path class="sig" d="M60 80 L140 80 L140 150 L200 150 L200 80 L260 80 L260 150 L320 150 L320 80 L380 80 L380 80 L440 80 L440 150 L500 150 L500 150 L560 150 L560 80 L620 80 L620 150 L680 150 L680 80 L740 80 L820 80"/>
+
+  <text class="muted" x="80" y="30">Idle</text>
+  <text class="muted" x="150" y="30">Start</text>
+  <text class="muted" x="210" y="30">D0</text>
+  <text class="muted" x="270" y="30">D1</text>
+  <text class="muted" x="330" y="30">D2</text>
+  <text class="muted" x="390" y="30">D3</text>
+  <text class="muted" x="450" y="30">D4</text>
+  <text class="muted" x="510" y="30">D5</text>
+  <text class="muted" x="570" y="30">D6</text>
+  <text class="muted" x="630" y="30">D7</text>
+  <text class="muted" x="700" y="30">Stop</text>
+</svg>

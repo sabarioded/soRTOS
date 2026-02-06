@@ -1,0 +1,29 @@
+<svg width="900" height="220" viewBox="0 0 900 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PWM waveform with period and duty cycle">
+  <style>
+    .sig { fill: none; stroke: #111; stroke-width: 2; }
+    .dim { fill: none; stroke: #555; stroke-width: 1.5; }
+    .label { font: 14px monospace; fill: #111; }
+    .muted { font: 12px monospace; fill: #444; }
+  </style>
+  <rect x="0" y="0" width="900" height="220" fill="#fff"/>
+
+  <text class="label" x="20" y="70">PWM</text>
+
+  <!-- PWM signal -->
+  <path class="sig" d="M60 160 L120 160 L120 80 L300 80 L300 160 L480 160 L480 80 L660 80 L660 160 L840 160"/>
+
+  <!-- Period (T) -->
+  <path class="dim" d="M120 190 L300 190"/>
+  <path class="dim" d="M120 186 L120 194"/>
+  <path class="dim" d="M300 186 L300 194"/>
+  <text class="muted" x="190" y="210">T (period)</text>
+
+  <!-- High time (Ton) -->
+  <path class="dim" d="M120 40 L300 40"/>
+  <path class="dim" d="M120 36 L120 44"/>
+  <path class="dim" d="M300 36 L300 44"/>
+  <text class="muted" x="175" y="30">Ton (high)</text>
+
+  <!-- Duty cycle note -->
+  <text class="muted" x="520" y="30">Duty = Ton / T</text>
+</svg>

@@ -41,12 +41,7 @@ The UART driver implements buffered serial communication with separate transmit 
 
 UART uses an asynchronous serial protocol with the following frame structure:
 
-```text
-      Idle   Start  D0   D1   D2   D3   D4   D5   D6   D7   Stop
-Logic 1 ──────┐       ┌────┐    ┌────┬────┐    ┌────┐    ┌────┐
-              │       │    │    │    │    │    │    │    │    │
-Logic 0       └───────┘    └────┘    │    └────┘    └────┘    └──────
-```
+![UART frame timing](images/uart_frame.svg)
 
 1.  **Idle:** Line High.
 2.  **Start:** Line Low for 1 bit time.
@@ -62,6 +57,7 @@ Logic 0       └───────┘    └────┘    │    └─
 ### Basic UART Communication
 ```c
 #include "uart.h"
+#include <string.h>
 
 // Create UART instance
 uint8_t rx_buf[256];
@@ -97,7 +93,5 @@ UART configuration includes:
 - Data bits
 - Stop bits
 - Parity
-- Flow control
 - Buffer sizes
-- Interrupt settings</content>
 - Interrupt settings

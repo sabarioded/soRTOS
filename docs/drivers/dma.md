@@ -51,13 +51,13 @@ DMA transfers follow a specific setup and execution lifecycle:
    '----------------------------'       '-----------------------------'
 
 3. Completion Phase
-   [DMA Controller] -> Interrupt -> [DMA Driver] -> Callback -> [Application]
+   [DMA Controller] -> Interrupt (HAL-specific) -> [Application]
 ```
 
 1.  **Configuration:** Driver sets source/destination addresses and transfer size.
 2.  **Arbitration:** DMA Controller requests bus access.
 3.  **Transfer:** Data moves independent of CPU.
-4.  **Completion:** Interrupt signals end of transfer.
+4.  **Completion:** The platform HAL signals end of transfer (interrupt or polling).
 
 ---
 

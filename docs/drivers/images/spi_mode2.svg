@@ -1,0 +1,28 @@
+<svg width="900" height="260" viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SPI mode 2 timing with CS, SCK, MOSI, MISO">
+  <style>
+    .sig { fill: none; stroke: #111; stroke-width: 2; }
+    .label { font: 14px monospace; fill: #111; }
+    .muted { font: 12px monospace; fill: #444; }
+  </style>
+  <rect x="0" y="0" width="900" height="260" fill="#fff"/>
+
+  <text class="label" x="20" y="50">CS</text>
+  <text class="label" x="20" y="120">SCK</text>
+  <text class="label" x="20" y="190">MOSI</text>
+  <text class="label" x="20" y="240">MISO</text>
+
+  <!-- CS: active low -->
+  <path class="sig" d="M60 40 L140 40 L140 70 L760 70 L760 40 L840 40"/>
+
+  <!-- SCK: CPOL=1, CPHA=0 (idle high) -->
+  <path class="sig" d="M140 90 L200 90 L200 130 L230 130 L230 90 L260 90 L260 130 L290 130 L290 90 L320 90 L320 130 L350 130 L350 90 L380 90 L380 130 L410 130 L410 90 L440 90 L440 130 L470 130 L470 90 L500 90 L500 130 L530 130 L530 90 L560 90 L560 130 L590 130 L590 90 L620 90 L620 130 L650 130 L650 90 L680 90 L680 130 L710 130 L710 90 L760 90"/>
+
+  <!-- MOSI: data changes on rising edge, sampled on falling edge -->
+  <path class="sig" d="M140 170 L230 170 L230 200 L290 200 L290 170 L350 170 L350 200 L410 200 L410 170 L470 170 L470 200 L530 200 L530 170 L590 170 L590 200 L650 200 L650 170 L760 170"/>
+
+  <!-- MISO: data from slave, sampled on falling edge -->
+  <path class="sig" d="M140 220 L230 220 L230 250 L290 250 L290 220 L350 220 L350 250 L410 250 L410 220 L470 220 L470 250 L530 250 L530 220 L590 220 L590 250 L650 250 L650 220 L760 220"/>
+
+  <text class="muted" x="150" y="20">Mode 2 (CPOL=1, CPHA=0)</text>
+  <text class="muted" x="420" y="20">Sample on falling edge</text>
+</svg>

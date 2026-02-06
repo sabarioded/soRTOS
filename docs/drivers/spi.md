@@ -32,22 +32,27 @@ The SPI driver architecture:
 
 SPI is a 4-wire, full-duplex synchronous serial interface.
 
-```text
-      CS Asserted (Active Low)
-CS:   High ────────┐                                       ┌─────── High
-                   │                                       │
-SCK:  Idle ────────┼───┐   ┌───┐   ┌───┐       ┌───┐   ┌───┼─────── Idle
-                   │   │   │   │   │   │  ...  │   │   │   │
-MOSI: XXXXXXXXXXXXX│ ┌───┐ │ ┌───┐ │ ┌─┐       ┌───┐ │ ┌───│XXXXXXX
-                   └─┘   └─┴─┘   └─┴─┘ └───────┘   └─┴─┘   ┘
-                     [D7]    [D6]    [D5]        [D0]
-```
+![SPI mode 0 timing diagram](images/spi_mode0.svg)
 
 1.  **Chip Select (CS):** Driven Low to select the device.
 2.  **Clock (SCK):** Master toggles clock. Data is valid on edges.
-3.  **MOSI/MISO:** Data bits shifted out simultaneously on clock transitions.
+3.  **MOSI/MISO:** Full-duplex data is shifted out on MOSI and sampled on MISO.
     *   **CPOL=0:** Clock idles Low.
     *   **CPHA=0:** Data sampled on rising edge.
+
+---
+
+Mode 1 (CPOL=0, CPHA=1) — sample on falling edge.
+
+![SPI mode 1 timing diagram](images/spi_mode1.svg)
+
+Mode 2 (CPOL=1, CPHA=0) — sample on falling edge.
+
+![SPI mode 2 timing diagram](images/spi_mode2.svg)
+
+Mode 3 (CPOL=1, CPHA=1) — sample on rising edge.
+
+![SPI mode 3 timing diagram](images/spi_mode3.svg)
 
 ---
 
@@ -65,10 +70,10 @@ if (spi == NULL) {
     // Handle error
 }
 
-// Transmit and receive data
+// Transmit and receive data (full-duplex)
 uint8_t tx_data[] = {0x01, 0x02, 0x03};
 uint8_t rx_data[3];
-if (spi_transceive(spi, tx_data, rx_data, sizeof(tx_data)) == 0) {
+if (spi_transfer(spi, tx_data, rx_data, sizeof(tx_data)) == 0) {
     // Process received data
 }
 

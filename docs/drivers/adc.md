@@ -11,7 +11,7 @@
 
 ## Overview
 
-The ADC (Analog-to-Digital Converter) driver provides an interface for reading analog voltage levels from microcontroller pins. It supports single-channel conversions with configurable resolution and sampling parameters.
+The ADC (Analog-to-Digital Converter) driver provides an interface for reading analog voltage levels from microcontroller pins. It supports single-channel conversions; resolution and sampling details are configured by the platform HAL.
 
 ---
 

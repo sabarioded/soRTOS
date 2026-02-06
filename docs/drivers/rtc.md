@@ -56,5 +56,4 @@ if (rtc_init() == 0) {
 The RTC driver uses a low-speed clock source for operation. Configuration includes:
 - Clock source selection
 - Initial time/date setting
-- Alarm and wakeup configurations (if supported)</content>
 - Alarm and wakeup configurations (if supported)

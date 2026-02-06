@@ -10,7 +10,7 @@
 
 ## Overview
 
-The DAC (Digital-to-Analog Converter) driver provides an interface for generating analog output voltages from digital values. It supports dual-channel operation with 12-bit resolution.
+The DAC (Digital-to-Analog Converter) driver provides an interface for generating analog output voltages from digital values. Channel count and resolution are platform-specific (STM32L4 supports two 12-bit channels).
 
 ### Key Features
 

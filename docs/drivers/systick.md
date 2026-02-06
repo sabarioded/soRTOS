@@ -79,4 +79,4 @@ SysTick configuration requires:
 - Interrupt priority setting
 - Clock source selection
 
-The tick frequency affects timing resolution and system performance.</content>
+The tick frequency affects timing resolution and system performance.

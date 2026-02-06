@@ -11,6 +11,7 @@
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Supported Platforms](#supported-platforms)
+- [Project Status](#project-status)
 - [Architecture](#architecture)
 - [Kernel Components](#kernel-components)
   - [Scheduler](#scheduler)
@@ -21,6 +22,7 @@
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Building the Project](#building-the-project)
+  - [Demo (Native)](#demo-native)
   - [Writing Your First Application](#writing-your-first-application)
 - [Configuration](#configuration)
 - [Documentation](#documentation)
@@ -84,51 +86,67 @@ The modular architecture makes adding new platform support straightforward - onl
 
 ---
 
+## Project Status
+
+**Builds and tests:**  
+* `make test` (native) passes.  
+* `gmake PLATFORM=stm32l476rg` builds cleanly and produces `build/stm32l476rg/soRTOS.elf`.
+
+This repo is in a demo-ready state: core kernel features are implemented, driver/HAL separation is enforced, and documentation includes protocol diagrams and usage examples.
+
+---
+
 ## Architecture
 
 ```mermaid
 graph TD
-    subgraph Application[Application Layer]
-        AppTasks[User Tasks]
-        AppMain[main.c]
+    subgraph App["Application Layer"]
+        AppMain["app/src/main.c"]
+        AppAPI["app/interface"]
+        AppTasks["App Tasks"]
     end
 
-    subgraph Kernel[Kernel Layer]
-        Scheduler[Scheduler<br/>Stride Algorithm]
-        Allocator[Memory Allocator<br/>TLSF]
-        IPC[Mutexes, Semaphores<br/>Queues, Event Groups]
-        Services[Timers, Logger<br/>CLI]
+    subgraph Kernel["Kernel Layer"]
+        Scheduler["Scheduler"]
+        Allocator["Allocator (TLSF)"]
+        IPC["IPC (Mutex/Sem/Queue/EG)"]
+        Services["Timers / Logger / CLI"]
     end
 
-    subgraph Architecture[Architecture Layer]
-        ContextSwitch[Context Switch<br/>Assembly]
-        Interrupts[Interrupt Handling]
-        ArchOps[Architecture Operations]
+    subgraph Drivers["Driver Layer (Platform-Agnostic)"]
+        DIf["drivers/interface"]
+        DCore["drivers/src"]
     end
 
-    subgraph Platform[Platform Layer]
-        Drivers[UART, GPIO<br/>SPI, etc.]
-        Clock[System Clock]
-        Startup[Startup Code]
+    subgraph HAL["HAL / Platform Drivers"]
+        HalIf["platform/*/drivers/*_hal.h"]
     end
 
-    AppTasks --> Scheduler
-    AppTasks --> IPC
-    AppTasks --> Services
-    Scheduler --> ContextSwitch
-    Scheduler --> Interrupts
-    Allocator --> ArchOps
-    IPC --> ArchOps
-    Services --> Drivers
-    Drivers --> Clock
-    AppMain --> Startup
+    subgraph Platform["Platform + Arch"]
+        Startup["Startup / Linker"]
+        ArchOps["arch/*"]
+        Clock["platform/*/system_clock"]
+    end
+
+    subgraph HW["Hardware"]
+        Periph["MCU Peripherals"]
+    end
+
+    AppMain --> Kernel
+    AppTasks --> Kernel
+    Kernel --> Drivers
+    Drivers --> HAL
+    HAL --> Periph
+    Kernel --> ArchOps
+    Startup --> ArchOps
 ```
 
 **Layer Separation:**
-*   **Kernel:** Platform-agnostic core logic
-*   **Architecture:** CPU-specific assembly and operations
-*   **Platform:** Board-specific drivers and configuration
 *   **Application:** User code and tasks
+*   **Kernel:** Platform-agnostic core logic
+*   **Drivers:** Platform-agnostic driver logic with clean interfaces
+*   **HAL:** Platform-specific hardware access (per board)
+*   **Architecture:** CPU-specific assembly and operations
 
 ---
 
@@ -279,8 +297,8 @@ Collection of low-level helper functions for register polling, string manipulati
 ```
 soRTOS/
 ├── app/                    # Application code and main()
-│   ├── main.c
-│   └── app_commands.c
+│   ├── interface/          # App-facing headers
+│   └── src/                # App implementation
 ├── arch/                   # Architecture-specific code
 │   ├── arm/
 │   │   └── cortex_m4/     # ARM Cortex-M4 implementation
@@ -329,7 +347,8 @@ soRTOS/
 Build and run on your development machine for testing and development:
 
 ```bash
-make native
+make
+./build/native/soRTOS.elf
 ```
 
 #### Cross-Compilation Build (Embedded Target)
@@ -368,6 +387,26 @@ Run unit tests on the native host platform:
 make test
 ```
 
+### Demo (Native)
+
+Example CLI session (native build):
+
+```
+$ make
+$ ./build/native/soRTOS.elf
+
+soRTOS> help
+Available commands:
+  help       List commands
+  tasks      List all tasks
+  uptime     How long the system is up
+  heap       Show heap statistics (dynamic mode only)
+  log        Manage system logs
+
+soRTOS> uptime
+Uptime: 0 Days, 0 Hours, 0 Minutes, 3 Seconds.421
+```
+
 ### Writing Your First Application
 
 Creating tasks and using the OS is straightforward:
@@ -375,6 +414,7 @@ Creating tasks and using the OS is straightforward:
 ```c
 #include "scheduler.h"
 #include "cli.h"
+#include "platform.h"
 
 void my_task(void *arg) {
     while (1) {
@@ -384,7 +424,8 @@ void my_task(void *arg) {
 }
 
 int main(void) {
-    system_init();  // Setup clocks and drivers
+    platform_init();
+    scheduler_init();
     
     // Create a task with 1KB stack and normal priority
     task_create(my_task, NULL, STACK_SIZE_1KB, TASK_WEIGHT_NORMAL);
@@ -436,6 +477,10 @@ See individual component documentation for detailed configuration options.
 ## Documentation
 
 Comprehensive documentation is available for all kernel components:
+
+### Project Overview
+
+*   **[Overview](docs/overview.md)** - Architecture, layering, and build/test commands
 
 ### Core Components
 

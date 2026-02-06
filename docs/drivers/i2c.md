@@ -11,7 +11,7 @@
 
 ## Overview
 
-The I2C (Inter-Integrated Circuit) driver provides a master-mode interface for communicating with I2C slave devices. It supports data transmission and reception with configurable timing parameters.
+The I2C (Inter-Integrated Circuit) driver provides a master-mode interface for communicating with I2C slave devices. Timing parameters and maximum transfer length are configured by the platform HAL.
 
 ---
 
@@ -22,7 +22,7 @@ The I2C driver manages I2C bus communication as a master device, handling the pr
 The I2C driver abstraction stack:
 
 1.  **Application:** Initiates transfers (e.g., "Write 2 bytes to device 0x68").
-2.  **I2C Driver:** Formats the request into an I2C transaction structure.
+2.  **I2C Driver:** Validates parameters and forwards the request to the HAL.
 3.  **I2C HAL:** Manages the low-level signal generation (Start, Stop, ACK/NACK).
 4.  **Hardware:** The I2C peripheral drives the **SDA** and **SCL** lines to communicate with Slave Devices.
 
@@ -32,18 +32,20 @@ The I2C driver abstraction stack:
 
 I2C is a synchronous, multi-master, multi-slave packet switched bus.
 
-```text
-          Start   Addr (7-bit)   R/W  ACK   Data (8-bit)   ACK  Stop
-       __      _   _        _   _    _     _        _   _    __
-SDA:  /  \____/ \_/ \_...._/ \_/ \__/ \___/ \_...._/ \__/ \__/  \___
-      ____    _   _        _   _    _     _        _   _    ____
-SCL:      \__/ \_/ \_...._/ \_/ \__/ \___/ \_...._/ \__/ \_/
-```
+![I2C timing diagram](images/i2c_timing.svg)
 
 1.  **Start Condition:** SDA transitions High -> Low while SCL is High.
 2.  **Clocking:** Data changes when SCL is Low, sampled when SCL is High.
 3.  **Acknowledge:** Receiver pulls SDA Low during the 9th clock pulse.
 4.  **Stop Condition:** SDA transitions Low -> High while SCL is High.
+
+---
+
+### Repeated Start (Combined Transaction)
+
+![I2C repeated start timing](images/i2c_repeated_start.svg)
+
+A repeated start lets the master keep control of the bus between a write and a read (e.g., writing a register address, then reading data) without issuing a stop condition.
 
 ---
 
@@ -76,3 +78,7 @@ i2c_destroy(i2c);
 ```
 
 ---
+
+### Async Notes
+
+For async transfers, the callback receives a status code: `I2C_STATUS_OK`, `I2C_STATUS_NACK`, or `I2C_STATUS_ERR`.

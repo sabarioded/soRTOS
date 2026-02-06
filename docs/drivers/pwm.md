@@ -13,6 +13,8 @@
 
 The PWM (Pulse Width Modulation) driver provides an interface for generating PWM signals using hardware timers. It supports configurable frequency and duty cycle for applications like motor control, LED dimming, and signal generation.
 
+![PWM waveform](images/pwm_waveform.svg)
+
 ### Key Features
 
 - Configurable PWM frequency
@@ -29,7 +31,7 @@ The PWM driver utilizes hardware timers to generate PWM signals, providing preci
 **Operation:**
 
 1.  **Application:** Sets desired Frequency and Duty Cycle.
-2.  **PWM Driver:** Calculates the required timer period and query comparison values.
+2.  **PWM Driver:** Calculates the required timer period and compare values.
 3.  **Hardware Timer:** Increments a counter and compares it against the set values to toggle the output pin state automatically.
 
 ---
@@ -83,4 +85,4 @@ PWM configuration requires:
 - Desired frequency
 - Initial duty cycle
 
-The frequency is limited by the timer clock and counter resolution.</content>
+The frequency is limited by the timer clock and counter resolution.

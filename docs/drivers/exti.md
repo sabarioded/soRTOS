@@ -56,5 +56,5 @@ EXTI configuration involves:
 - Selecting the GPIO pin and port
 - Choosing the trigger type
 - Providing a callback function
-- Enabling the interrupt after configuration</content>
+- Enabling the interrupt after configuration
 - Enable/disable interrupt control

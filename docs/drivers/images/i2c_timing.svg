@@ -1,0 +1,21 @@
+<svg width="900" height="240" viewBox="0 0 900 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="I2C start, address, ACK, data, stop timing">
+  <style>
+    .sig { fill: none; stroke: #111; stroke-width: 2; }
+    .label { font: 14px monospace; fill: #111; }
+    .muted { font: 12px monospace; fill: #444; }
+  </style>
+  <rect x="0" y="0" width="900" height="240" fill="#fff"/>
+
+  <text class="label" x="20" y="60">SCL</text>
+  <text class="label" x="20" y="140">SDA</text>
+
+  <path class="sig" d="M60 40 L100 40 L100 80 L110 80 L110 40 L120 40 L120 80 L130 80 L130 80 L140 80 L140 40 L150 40 L150 80 L160 80 L160 80 L170 80 L170 40 L180 40 L180 80 L190 80 L190 80 L200 80 L200 40 L210 40 L210 80 L220 80 L220 80 L230 80 L230 40 L240 40 L240 80 L250 80 L250 80 L260 80 L260 40 L270 40 L270 80 L280 80 L280 80 L290 80 L290 40 L300 40 L300 80 L310 80 L310 80 L320 80 L320 40 L330 40 L330 80 L340 80 L340 80 L350 80 L350 40 L360 40 L360 80 L370 80 L370 80 L380 80 L380 40 L390 40 L390 80 L400 80 L400 80 L410 80 L410 40 L420 40 L420 80 L430 80 L430 80 L440 80 L440 40 L450 40 L450 80 L460 80 L460 80 L470 80 L470 40 L480 40 L480 80 L490 80 L490 80 L500 80 L500 40 L510 40 L510 80 L520 80 L520 80 L530 80 L530 40 L540 40 L540 80 L550 80 L550 80 L560 80 L560 40 L570 40 L570 80 L580 80 L580 80 L590 80 L590 40 L600 40 L600 80 L610 80 L610 80 L620 80 L620 40 L630 40 L630 80 L640 80 L650 80 L650 40 L720 40"/>
+  <path class="sig" d="M60 120 L90 120 L90 160 L100 160 L100 120 L130 120 L130 160 L160 160 L160 120 L190 120 L190 160 L220 160 L250 160 L250 120 L280 120 L310 120 L310 160 L340 160 L370 160 L370 120 L400 120 L430 120 L430 160 L460 160 L490 160 L490 120 L520 120 L520 160 L550 160 L550 120 L580 120 L580 160 L610 160 L640 160 L660 160 L660 120 L720 120"/>
+
+  <text class="muted" x="95" y="30">Start</text>
+  <text class="muted" x="200" y="30">Addr + R/W</text>
+  <text class="muted" x="360" y="30">ACK</text>
+  <text class="muted" x="430" y="30">Data</text>
+  <text class="muted" x="610" y="30">ACK</text>
+  <text class="muted" x="720" y="30">Stop</text>
+</svg>

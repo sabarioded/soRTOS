@@ -10,7 +10,7 @@
 
 ## Overview
 
-The GPIO (General Purpose Input/Output) driver provides a hardware abstraction layer for controlling digital input and output pins on microcontrollers. It supports various pin modes including input, output, alternate function, and analog modes.
+The GPIO (General Purpose Input/Output) driver provides a hardware abstraction layer for controlling digital input and output pins on microcontrollers. It supports various pin modes including input, output, alternate function, and analog modes. Port/mode enums are defined by the platform HAL.
 
 ### Key Features
 
@@ -28,7 +28,7 @@ The GPIO driver is implemented as a thin wrapper around the platform-specific Ha
 The GPIO driver serves as a bridge between the application and the hardware:
 
 1.  **Application:** Calls high-level driver functions (e.g., `gpio_write`).
-2.  **GPIO Driver:** Validates parameters and maps logic to the specific hardware implementation.
+2.  **GPIO Driver:** Forwards parameters to the platform HAL.
 3.  **GPIO HAL:** Executes the platform-specific register operations.
 4.  **Hardware:** The physical GPIO controller performs the electrical signal change.
 
