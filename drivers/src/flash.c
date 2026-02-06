@@ -1,5 +1,6 @@
 #include "flash.h"
 #include "flash_hal.h"
+#include "utils.h"
 
 void flash_unlock(void) {
     flash_hal_unlock();
@@ -17,9 +18,14 @@ int flash_program(uint32_t addr, const void *data, size_t len) {
     if (!data || (len == 0)) {
         return -1;
     }
-    /* STM32L4 requires 64-bit aligned address and length. */
-    if ((addr & 0x7U) != 0U || (len & 0x7U) != 0U) {
+    /* Platform-specific alignment/granularity checks are handled by the HAL. */
+    return flash_hal_program(addr, data, len);
+}
+
+int flash_read(uintptr_t addr, void *out, size_t len) {
+    if (!out || len == 0U) {
         return -1;
     }
-    return flash_hal_program(addr, data, len);
+    utils_memcpy(out, (const void *)addr, len);
+    return 0;
 }

@@ -82,6 +82,14 @@ static inline int flash_hal_erase_page(uint32_t page_addr) {
  * @brief Program data (Double Word - 64-bit).
  */
 static inline int flash_hal_program(uint32_t addr, const void *data, size_t len) {
+    if (!data || len == 0U) {
+        return -1;
+    }
+    /* STM32L4 requires 64-bit aligned address and length. */
+    if ((addr & 0x7U) != 0U || (len & 0x7U) != 0U) {
+        return -1;
+    }
+
     const uint64_t *src = (const uint64_t *)data;
     volatile uint64_t *dst = (volatile uint64_t *)addr;
     size_t count = len / 8;

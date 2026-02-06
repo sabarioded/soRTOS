@@ -35,7 +35,7 @@ void test_flash_erase_page_should_CallHal(void) {
     TEST_ASSERT_EQUAL(-1, res);
 }
 
-void test_flash_program_should_CallHal_WhenAligned(void) {
+void test_flash_program_should_CallHal_WithValidArgs(void) {
     uint64_t data = 0x123456789ABCDEF0;
     mock_flash_program_return = 0;
     
@@ -45,13 +45,32 @@ void test_flash_program_should_CallHal_WhenAligned(void) {
     TEST_ASSERT_EQUAL(8, mock_flash_program_len);
 }
 
-void test_flash_program_should_Fail_WhenNotAligned(void) {
-    uint32_t data = 0x12345678;
-    /* Length 4 is not multiple of 8 (STM32L4 requirement) */
-    int res = flash_program(0x08001000, &data, 4);
+void test_flash_program_should_Fail_OnInvalidArgs(void) {
+    uint64_t data = 0x123456789ABCDEF0;
+    int res = flash_program(0x08001000, NULL, 8);
+    TEST_ASSERT_EQUAL(-1, res);
+    res = flash_program(0x08001000, &data, 0);
     TEST_ASSERT_EQUAL(-1, res);
     /* Should not have called HAL */
     TEST_ASSERT_EQUAL(0, mock_flash_program_len);
+}
+
+void test_flash_read_should_Fail_OnInvalidArgs(void) {
+    uint32_t out = 0;
+    int res = flash_read(0x08000000, NULL, 4);
+    TEST_ASSERT_EQUAL(-1, res);
+    res = flash_read(0x08000000, &out, 0);
+    TEST_ASSERT_EQUAL(-1, res);
+}
+
+void test_flash_read_should_Copy_WhenAddressFits(void) {
+    uint8_t src[4] = {0x11, 0x22, 0x33, 0x44};
+    uint8_t dst[4] = {0};
+
+    uintptr_t addr = (uintptr_t)src;
+    int res = flash_read(addr, dst, sizeof(dst));
+    TEST_ASSERT_EQUAL(0, res);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(src, dst, sizeof(dst));
 }
 
 void run_flash_tests(void) {
@@ -63,8 +82,10 @@ void run_flash_tests(void) {
     RUN_TEST(test_flash_unlock_should_CallHal);
     RUN_TEST(test_flash_lock_should_CallHal);
     RUN_TEST(test_flash_erase_page_should_CallHal);
-    RUN_TEST(test_flash_program_should_CallHal_WhenAligned);
-    RUN_TEST(test_flash_program_should_Fail_WhenNotAligned);
+    RUN_TEST(test_flash_program_should_CallHal_WithValidArgs);
+    RUN_TEST(test_flash_program_should_Fail_OnInvalidArgs);
+    RUN_TEST(test_flash_read_should_Fail_OnInvalidArgs);
+    RUN_TEST(test_flash_read_should_Copy_WhenAddressFits);
 
     printf("=== Flash Tests Complete ===\n");
 }
