@@ -78,7 +78,7 @@ void platform_yield(void) {
 }
 
 /* Platform Mock: UART init */
-void platform_uart_init(void) {}
+uart_port_t platform_uart_init(void) { return NULL; }
 
 /* Platform Mock: UART receive (always empty) */
 int platform_uart_getc(char *out_ch) {

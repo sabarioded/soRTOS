@@ -6,6 +6,7 @@
 #include "arch_ops.h"
 #include "queue.h"
 #include "spinlock.h"
+#include "platform.h"
 
 
 static struct {
@@ -387,8 +388,13 @@ void cli_task_entry(void *arg) {
             /* Fallback to polling/notify if no queue set */
             int ret = cli_ctx.getc(&c); 
             if(ret == 0) {
+#ifdef HOST_PLATFORM
+                /* No scheduler context switching on host; idle briefly. */
+                platform_cpu_idle();
+#else
                 /* Block until notified by UART ISR (or timeout after 1s) */
-                task_notify_wait(1, 1000); 
+                task_notify_wait(1, 1000);
+#endif
                 continue;
             }
         }

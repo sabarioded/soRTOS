@@ -40,6 +40,14 @@ void test_utils_strcmp(void) {
     TEST_ASSERT_LESS_THAN(0, utils_strcmp("abc", "abcd")); /* Length check */
 }
 
+/* Verify utils_strlen behavior */
+void test_utils_strlen(void) {
+    TEST_ASSERT_EQUAL_UINT32(0, utils_strlen(""));
+    TEST_ASSERT_EQUAL_UINT32(3, utils_strlen("abc"));
+    TEST_ASSERT_EQUAL_UINT32(5, utils_strlen("hello"));
+    TEST_ASSERT_EQUAL_UINT32(0, utils_strlen(NULL));
+}
+
 /* Verify utils_atoi conversion */
 void test_utils_atoi(void) {
     TEST_ASSERT_EQUAL(123, utils_atoi("123"));
@@ -89,6 +97,7 @@ void run_utils_tests(void) {
     RUN_TEST(test_utils_memset);
     RUN_TEST(test_utils_memcpy);
     RUN_TEST(test_utils_strcmp);
+    RUN_TEST(test_utils_strlen);
     RUN_TEST(test_utils_atoi);
     RUN_TEST(test_wait_for_flag_set_success);
     RUN_TEST(test_wait_for_flag_set_timeout);

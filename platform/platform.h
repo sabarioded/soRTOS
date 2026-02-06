@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "queue.h"
+#include "uart.h"
 #include "platform_config.h"
 
 /**
@@ -69,8 +70,9 @@ void platform_yield(void);
 
 /**
  * @brief Initialize the platform UART for CLI/Logging.
+ * @return UART port handle if a driver-backed UART is available, otherwise NULL.
  */
-void platform_uart_init(void);
+uart_port_t platform_uart_init(void);
 
 /**
  * @brief Platform-specific UART receive char (non-blocking).

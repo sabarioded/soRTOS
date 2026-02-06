@@ -187,8 +187,6 @@ static int cmd_uptime_handler(int argc, char **argv) {
     /* every tick is 1ms */
     uint32_t ticks = (uint32_t)platform_get_ticks();
     uint32_t seconds = ticks / 1000;
-    uint32_t mili_sec = ticks % 1000;
-
     /* every 60sec is a minute*/
     uint32_t minutes = seconds / 60;
     seconds = seconds % 60;
@@ -201,8 +199,8 @@ static int cmd_uptime_handler(int argc, char **argv) {
     uint32_t days = hours / 24;
     hours = hours % 24;
 
-    cli_printf("Uptime: %u Days, %u Hours, %u Minutes, %u Seconds.%u\r\n",
-                        days,    hours,    minutes,    seconds,   mili_sec);
+    cli_printf("Uptime: %u Days, %u Hours, %u Minutes, %u Seconds\r\n",
+                        days,    hours,    minutes,    seconds);
 
     return 0;
 }

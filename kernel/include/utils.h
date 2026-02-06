@@ -92,6 +92,14 @@ void *utils_memcpy(void *dest, const void *src, size_t count);
  */
 int utils_strcmp(const char *str1, const char *str2);
 
+/**
+ * @brief Get the length of a string.
+ * 
+ * @param str Null-terminated string.
+ * @return Number of characters before the null terminator.
+ */
+size_t utils_strlen(const char *str);
+
 #ifdef __cplusplus
 }
 #endif

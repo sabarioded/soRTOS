@@ -32,7 +32,7 @@ void platform_init(void) {
     memory_map_init();
 }
 
-void platform_uart_init(void) {
+uart_port_t platform_uart_init(void) {
     /* 
      * Configure the host terminal to behave like a raw UART:
      * 1. Disable Canonical Mode (Input is available immediately, not line-by-line)
@@ -53,6 +53,8 @@ void platform_uart_init(void) {
     
     /* Disable buffering on stdout to ensure prints appear immediately */
     setvbuf(stdout, NULL, _IONBF, 0);
+
+    return NULL;
 }
 
 int platform_uart_getc(char *out_ch) {

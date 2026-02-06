@@ -117,7 +117,7 @@ void platform_reset(void) {
     arch_reset();
 }
 
-void platform_uart_init(void) {
+uart_port_t platform_uart_init(void) {
     /* Initialize UART2 with buffered operation */
     UART_Config_t uart_config = {
         .BaudRate = 115200,
@@ -144,6 +144,8 @@ void platform_uart_init(void) {
     
     /* Enable RX interrupt for buffered reception */
     uart_enable_rx_interrupt(uart2_port, 1);
+
+    return uart2_port;
 }
 
 int platform_uart_getc(char *out_ch) {
@@ -181,5 +183,12 @@ void platform_uart_set_rx_queue(queue_t *q) {
 void platform_uart_set_tx_queue(queue_t *q) {
     if (uart2_port) {
         uart_set_tx_queue(uart2_port, q);
+    }
+}
+
+/* USART2 IRQ handler: wire UART HAL to driver core */
+void USART2_IRQHandler(void) {
+    if (uart2_port) {
+        uart_hal_irq_handler(USART2, uart2_port);
     }
 }

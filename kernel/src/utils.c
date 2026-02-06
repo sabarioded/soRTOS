@@ -85,3 +85,15 @@ int utils_strcmp(const char *str1, const char *str2) {
     }
     return *(const unsigned char *)str1 - *(const unsigned char *)str2;
 }
+
+/* String length */
+size_t utils_strlen(const char *str) {
+    size_t len = 0;
+    if (!str) {
+        return 0;
+    }
+    while (str[len] != '\0') {
+        len++;
+    }
+    return len;
+}

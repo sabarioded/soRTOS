@@ -14,8 +14,9 @@ CONFIG_DIR  = config
 
 # Common Sources
 C_SRCS += \
-	$(APP_DIR)/main.c \
-	$(APP_DIR)/app_commands.c \
+	$(APP_DIR)/src/main.c \
+	$(APP_DIR)/src/console.c \
+	$(APP_DIR)/src/app_commands.c \
 	$(KERNEL_DIR)/src/utils.c \
 	$(KERNEL_DIR)/src/scheduler.c \
 	$(KERNEL_DIR)/src/cli.c \
@@ -31,7 +32,7 @@ C_SRCS += \
 
 # Common Includes
 INCLUDES += \
-	-I$(APP_DIR) \
+	-I$(APP_DIR)/interface \
 	-I$(KERNEL_DIR)/include \
 	-I$(DRIVERS_DIR)/interface \
 	-I$(PLATFORM_DIR) \
@@ -137,13 +138,45 @@ $(BUILD_DIR)/$(TARGET).elf: $(OBJS) $(LDSCRIPT)
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) -o $@
 	@echo "Build complete: $@"
 
-$(BUILD_DIR)/%.o: %.c
+$(BUILD_DIR)/app/src/%.o: app/src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
-$(BUILD_DIR)/%.o: %.S
+$(BUILD_DIR)/kernel/src/%.o: kernel/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD_DIR)/drivers/src/%.o: drivers/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD_DIR)/platform/native/%.o: platform/native/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD_DIR)/platform/native/drivers/%.o: platform/native/drivers/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD_DIR)/platform/stm32l476rg/%.o: platform/stm32l476rg/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD_DIR)/arch/arm/cortex_m4/%.o: arch/arm/cortex_m4/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD_DIR)/arch/native/%.o: arch/native/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD_DIR)/arch/arm/cortex_m4/%.o: arch/arm/cortex_m4/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 clean:
 	rm -rf build
