@@ -60,14 +60,24 @@ typedef struct {
     uint8_t IncrementDst;       /* 1 to increment destination address */
 } DMA_Config_t;
 
+typedef struct {
+    DMA_Channel_TypeDef *Channel;
+    DMA_Direction_t Direction;
+} DMA_Handle_t;
+
 /**
  * @brief Initialize the DMA hardware channel.
  */
 static inline void dma_hal_init(void *hal_handle, void *config_ptr) {
-    DMA_Channel_TypeDef *dma_channel = (DMA_Channel_TypeDef *)hal_handle;
+    DMA_Handle_t *handle = (DMA_Handle_t *)hal_handle;
     DMA_Config_t *cfg = (DMA_Config_t *)config_ptr;
 
-    if (!dma_channel || !cfg || !cfg->DmaBase) return;
+    if (!handle || !handle->Channel || !cfg || !cfg->DmaBase) {
+        return;
+    }
+
+    DMA_Channel_TypeDef *dma_channel = handle->Channel;
+    handle->Direction = cfg->Direction;
 
     /* 1. Enable DMA Clock */
     if (cfg->DmaBase == DMA1) {
@@ -134,34 +144,22 @@ static inline void dma_hal_init(void *hal_handle, void *config_ptr) {
  * @brief Start a DMA transfer.
  */
 static inline void dma_hal_start(void *hal_handle, uintptr_t src, uintptr_t dst, size_t length) {
-    DMA_Channel_TypeDef *dma_channel = (DMA_Channel_TypeDef *)hal_handle;
+    DMA_Handle_t *handle = (DMA_Handle_t *)hal_handle;
+    if (!handle || !handle->Channel) {
+        return;
+    }
+    DMA_Channel_TypeDef *dma_channel = handle->Channel;
     
     /* Disable channel to configure addresses */
     dma_channel->CCR &= ~DMA_CCR_EN;
 
     dma_channel->CNDTR = (uint32_t)length;
-    dma_channel->CPAR = (uint32_t)dst; /* In M2P, CPAR is dest. In P2M, CPAR is src. Wait. */
-    /* STM32 Ref Manual: CPAR is Peripheral Address, CMAR is Memory Address.
-       Direction bit in CCR determines which is source/dest.
-       If M2P (DIR=1): Src=CMAR, Dst=CPAR.
-       If P2M (DIR=0): Src=CPAR, Dst=CMAR.
-       
-       However, the generic API passes 'src' and 'dst'. We need to map them correctly based on direction.
-       Since we don't store direction in the handle for HAL, we assume the user passes them correctly 
-       relative to the configured direction, OR we just set them blindly if we assume standard usage.
-       
-       Let's assume standard usage:
-       If we configured M2P: src should be Memory (CMAR), dst should be Periph (CPAR).
-       If we configured P2M: src should be Periph (CPAR), dst should be Memory (CMAR).
-       
-       To do this correctly in a static inline without context, we check the CCR DIR bit.
-    */
-    
-    if (dma_channel->CCR & DMA_CCR_MEM2MEM) {
+    /* Map src/dst based on configured direction. */
+    if (handle->Direction == DMA_DIR_MEM_TO_MEM) {
         /* Mem2Mem: CPAR is target, CMAR is source */
         dma_channel->CPAR = (uint32_t)dst;
         dma_channel->CMAR = (uint32_t)src;
-    } else if (dma_channel->CCR & DMA_CCR_DIR) {
+    } else if (handle->Direction == DMA_DIR_MEM_TO_PERIPH) {
         /* Mem2Periph (DIR=1): CMAR -> CPAR */
         dma_channel->CMAR = (uint32_t)src;
         dma_channel->CPAR = (uint32_t)dst;
@@ -179,7 +177,9 @@ static inline void dma_hal_start(void *hal_handle, uintptr_t src, uintptr_t dst,
  * @brief Stop a DMA transfer.
  */
 static inline void dma_hal_stop(void *hal_handle) {
-    DMA_Channel_TypeDef *dma_channel = (DMA_Channel_TypeDef *)hal_handle;
+    DMA_Handle_t *handle = (DMA_Handle_t *)hal_handle;
+    if (!handle || !handle->Channel) return;
+    DMA_Channel_TypeDef *dma_channel = handle->Channel;
     dma_channel->CCR &= ~DMA_CCR_EN;
 }
 

@@ -63,12 +63,30 @@ DMA transfers follow a specific setup and execution lifecycle:
 
 ## Usage Examples
 
-### Memory-to-Memory Transfer
+### Memory-to-Memory Transfer (STM32 Example)
 ```c
 #include "dma.h"
+#include "dma_hal.h"
+
+DMA_Handle_t dma_handle = {
+    .Channel = DMA1_Channel1,
+    .Direction = DMA_DIR_MEM_TO_MEM,
+};
+
+DMA_Config_t dma_config = {
+    .DmaBase = DMA1,
+    .ChannelIndex = 1,
+    .Request = 0,
+    .Direction = DMA_DIR_MEM_TO_MEM,
+    .DataWidth = DMA_WIDTH_8BIT,
+    .Priority = DMA_PRIORITY_LOW,
+    .CircularMode = 0,
+    .IncrementSrc = 1,
+    .IncrementDst = 1,
+};
 
 // Create DMA channel
-dma_channel_t dma = dma_create(&dma_channel, &dma_config);
+dma_channel_t dma = dma_create(&dma_handle, &dma_config);
 if (dma == NULL) {
     // Handle error
 }
