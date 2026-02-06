@@ -404,7 +404,7 @@ Available commands:
   log        Manage system logs
 
 soRTOS> uptime
-Uptime: 0 Days, 0 Hours, 0 Minutes, 3 Seconds.421
+Uptime: 0 Days, 0 Hours, 0 Minutes, 3 Seconds
 ```
 
 ### Writing Your First Application
