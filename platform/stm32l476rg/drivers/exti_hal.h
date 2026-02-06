@@ -4,6 +4,8 @@
 #include "device_registers.h"
 #include "exti.h"
 
+#define EXTI_HAL_MAX_LINES 16U
+
 enum {
     EXTI_TRIGGER_RISING = 0,
     EXTI_TRIGGER_FALLING,

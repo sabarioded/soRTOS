@@ -4,6 +4,8 @@
 #include "exti.h"
 #include <stdint.h>
 
+#define EXTI_HAL_MAX_LINES 16U
+
 enum {
     EXTI_TRIGGER_RISING = 0,
     EXTI_TRIGGER_FALLING,

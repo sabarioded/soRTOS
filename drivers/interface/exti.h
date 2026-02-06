@@ -18,6 +18,7 @@ typedef void (*exti_callback_t)(void *arg);
  * @brief Configure an external interrupt line.
  * 
  * @param pin The pin number, which corresponds to the EXTI line.
+ *            Valid range is platform-specific (see EXTI_HAL_MAX_LINES in the HAL).
  * @param port The GPIO port index to map to this line.
  * @param trigger The trigger condition (Rising, Falling, Both).
  * @param callback Function to call when interrupt occurs.

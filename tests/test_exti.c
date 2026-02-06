@@ -25,6 +25,12 @@ void test_exti_configure_should_RegisterCallbackAndConfigHal(void) {
     TEST_ASSERT_EQUAL(1, mock_exti_configure_called);
 }
 
+void test_exti_configure_should_Fail_OnInvalidPin(void) {
+    int res = exti_configure(EXTI_HAL_MAX_LINES, 0, EXTI_TRIGGER_RISING, test_callback, (void*)0x1234);
+    TEST_ASSERT_EQUAL(-1, res);
+    TEST_ASSERT_EQUAL(0, mock_exti_configure_called);
+}
+
 void test_exti_enable_disable_should_CallHal(void) {
     exti_enable(5);
     TEST_ASSERT_EQUAL(1, mock_exti_enable_called);
@@ -54,6 +60,7 @@ void run_exti_tests(void) {
     test_tearDown_hook = tearDown_local;
     UnitySetTestFile("tests/test_exti.c");
     RUN_TEST(test_exti_configure_should_RegisterCallbackAndConfigHal);
+    RUN_TEST(test_exti_configure_should_Fail_OnInvalidPin);
     RUN_TEST(test_exti_enable_disable_should_CallHal);
     RUN_TEST(test_exti_core_irq_handler_should_InvokeCallback);
     RUN_TEST(test_exti_core_irq_handler_should_IgnoreInvalidPin);

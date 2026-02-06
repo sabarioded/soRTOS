@@ -3,6 +3,7 @@
 
 #include "device_registers.h"
 #include <stdint.h>
+#include <stddef.h>
 
 /* RCC Definitions for DMA */
 #define RCC_AHB1ENR_DMA1EN      (1U << 0)
@@ -132,13 +133,13 @@ static inline void dma_hal_init(void *hal_handle, void *config_ptr) {
 /**
  * @brief Start a DMA transfer.
  */
-static inline void dma_hal_start(void *hal_handle, uint32_t src, uint32_t dst, uint32_t length) {
+static inline void dma_hal_start(void *hal_handle, uintptr_t src, uintptr_t dst, size_t length) {
     DMA_Channel_TypeDef *dma_channel = (DMA_Channel_TypeDef *)hal_handle;
     
     /* Disable channel to configure addresses */
     dma_channel->CCR &= ~DMA_CCR_EN;
 
-    dma_channel->CNDTR = length;
+    dma_channel->CNDTR = (uint32_t)length;
     dma_channel->CPAR = (uint32_t)dst; /* In M2P, CPAR is dest. In P2M, CPAR is src. Wait. */
     /* STM32 Ref Manual: CPAR is Peripheral Address, CMAR is Memory Address.
        Direction bit in CCR determines which is source/dest.
@@ -158,16 +159,16 @@ static inline void dma_hal_start(void *hal_handle, uint32_t src, uint32_t dst, u
     
     if (dma_channel->CCR & DMA_CCR_MEM2MEM) {
         /* Mem2Mem: CPAR is target, CMAR is source */
-        dma_channel->CPAR = dst;
-        dma_channel->CMAR = src;
+        dma_channel->CPAR = (uint32_t)dst;
+        dma_channel->CMAR = (uint32_t)src;
     } else if (dma_channel->CCR & DMA_CCR_DIR) {
         /* Mem2Periph (DIR=1): CMAR -> CPAR */
-        dma_channel->CMAR = src;
-        dma_channel->CPAR = dst;
+        dma_channel->CMAR = (uint32_t)src;
+        dma_channel->CPAR = (uint32_t)dst;
     } else {
         /* Periph2Mem (DIR=0): CPAR -> CMAR */
-        dma_channel->CPAR = src;
-        dma_channel->CMAR = dst;
+        dma_channel->CPAR = (uint32_t)src;
+        dma_channel->CMAR = (uint32_t)dst;
     }
 
     /* Enable Channel */

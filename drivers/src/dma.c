@@ -46,7 +46,7 @@ int dma_start(dma_channel_t channel, void *src, void *dst, size_t length) {
     if (!channel || !channel->hal_handle) {
         return -1;
     }
-    dma_hal_start(channel->hal_handle, (uint32_t)(uintptr_t)src, (uint32_t)(uintptr_t)dst, length);
+    dma_hal_start(channel->hal_handle, (uintptr_t)src, (uintptr_t)dst, length);
     return 0;
 }
 
